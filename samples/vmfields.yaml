@@ -1,0 +1,29 @@
+resourceType: VirtualMachine
+rollupType: AVG
+rollupMinutes: 5
+fields:
+# CPU fields
+  - alias: cpuDemand
+    name: cpu|object.demand
+  - alias: cpuReady
+    name: cpu|readyPct
+  - alias: cpuCostop
+    name: cpu|costopPct
+# Memory fields
+  - alias: memDemand
+    name: mem|object.demand
+  - alias: memSwapOut
+    name: mem|swapoutRate_average
+  - alias: memSwapIn
+    name: mem|swapinRate_average
+ # Storage fields
+  - alias: storageDemandKbps
+    name: storage|demandKBps
+ # Network fields
+  - alias: netBytesRx
+    name: net|bytesRx_average
+  - alias: netBytesTx
+    name: net|bytesTx_average
+ # Host CPU
+  - alias: hostCPUDemand
+    name: $parent:HostSystem.cpu|demandmhz

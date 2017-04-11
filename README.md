@@ -47,3 +47,21 @@ cd target
 chmod +x exporttool.sh
 ./exporttool.sh -d ../samples/vmfields.yaml -u admin -p password -H https://my.vrops.host -i
 
+## Command syntax
+```
+usage: exporttool [-d <arg>] [-H <arg>] [-h] [-i] [-l <arg>] [-n <arg>]
+       [-o <arg>] [-p <arg>] [-q] [-u <arg>]
+Exports vRealize Operations Metrics
+ -d,--definition <arg>   Path to definition file
+ -H,--host <arg>         URL to vRealize Operations Host
+ -h,--help               Print a short help
+ -i,--ignore-cert        Trust any cert
+ -l,--lookback <arg>     Lookback time
+ -n,--namequery <arg>    Name query
+ -o,--output <arg>       Output file
+ -p,--password <arg>     Password
+ -q,--quiet              Quiet mode (no progress counter)
+ -u,--username <arg>     Username
+ ```
+
+

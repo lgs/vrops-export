@@ -4,7 +4,7 @@ rollupMinutes: 5
 fields:
 # CPU fields
   - alias: cpuDemand
-    name: cpu|object.demand
+    name: cpu|demandPct
   - alias: cpuReady
     name: cpu|readyPct
   - alias: cpuCostop

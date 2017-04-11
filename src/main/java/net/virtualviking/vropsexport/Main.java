@@ -5,6 +5,8 @@ import java.io.FileWriter;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 
+import javax.net.ssl.SSLException;
+
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;
@@ -47,12 +49,14 @@ public class Main {
     		String password = commandLine.getOptionValue('p');
     		if(password == null)
     			throw new ExporterException("Password must be specified");
-    		String host = commandLine.getOptionValue('h');
+    		String host = commandLine.getOptionValue('H');
     		if(host == null)
     			throw new ExporterException("Host URL must be specified");
     		String output = commandLine.getOptionValue('o');
     		String lb = commandLine.getOptionValue('l');
     		boolean trustCerts = commandLine.hasOption('i');
+    		String namePattern = commandLine.getOptionValue('n');
+    		boolean quiet = commandLine.hasOption('q');
     		
     		// Read definition and run it!
     		//
@@ -64,12 +68,16 @@ public class Main {
 		        long end = System.currentTimeMillis();
 		        long begin = end - lbMs;
 		        Writer wrt = output != null ? new FileWriter(output) : new OutputStreamWriter(System.out);
-		        exporter.exportTo(wrt, begin, end);
+		        exporter.exportTo(wrt, begin, end, namePattern, quiet);
 	    	} finally {
 	    		fr.close();
 	    	}
     	} catch(ExporterException e) {
     		System.err.println("ERROR: " + e.getMessage());
+    		System.exit(1);
+    	}
+    	catch(SSLException e) {
+    		System.err.println("SSL ERROR: " + e.getMessage() + "\n\nConsider using the -i option!");
     		System.exit(1);
     	}
     }
@@ -82,7 +90,7 @@ public class Main {
 		opts.addOption("u", "username", true, "Username");
 		opts.addOption("p", "password", true, "Password");
 		opts.addOption("o", "output", true, "Output file");
-		opts.addOption("h", "host", true, "URL to vRealize Operations Host");
+		opts.addOption("H", "host", true, "URL to vRealize Operations Host");
 		opts.addOption("q", "quiet", false, "Quiet mode (no progress counter)");
 		opts.addOption("i", "ignore-cert", false, "Trust any cert");
 		opts.addOption("h", "help", false, "Print a short help");
@@ -106,8 +114,8 @@ public class Main {
     		throw new ExporterException("Cannot parse time unit");
     	}
     	try {
-    		long t = Long.parseLong(lb);
-    		return t * unit;
+    		long t = Long.parseLong(lb.substring(0, lb.length() - 1));
+    		return t * scale;
     	} catch(NumberFormatException e) {
     		throw new ExporterException("Cannot parse time value");
     	}

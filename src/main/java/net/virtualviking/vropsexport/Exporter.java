@@ -102,7 +102,7 @@ public class Exporter {
 		return conf.getResourceType();
 	}
 
-	public void exportTo(Writer out, long begin, long end) throws IOException, HttpException {
+	public void exportTo(Writer out, long begin, long end, String namePattern, boolean quiet) throws IOException, HttpException {
 		BufferedWriter bw = new BufferedWriter(out);
 
 		// Output table header
@@ -120,10 +120,14 @@ public class Exporter {
 		// Get all objects
 		//
 		String url = "/suite-api/api/resources";
+		ArrayList<String> qs = new ArrayList<>();
 		if(conf.getResourceType() != null) {
-			url += "?resourceKind=" + conf.getResourceType();
+			qs.add("resourceKind=" + conf.getResourceType());
 		}
-		JSONObject json = this.getJson(url);
+		if(namePattern != null) {
+			qs.add("name=" + namePattern);
+		}
+		JSONObject json = this.getJson(url, qs);
 		JSONArray resources = json.getJSONArray("resourceList");
 		for (int i = 0; i < resources.length(); ++i) {
 			JSONObject res = resources.getJSONObject(i);
@@ -137,8 +141,10 @@ public class Exporter {
 					}
 				}
 			});
-			int pct = (100 * i) / resources.length();
-			System.err.print("" + pct + "% done\r");
+			if(!quiet) {
+				int pct = (100 * i) / resources.length();
+				System.err.print("" + pct + "% done\r");
+			}
 		}
 		executor.shutdown();
 		try {
@@ -150,7 +156,8 @@ public class Exporter {
 			return;
 		}
 		bw.flush();
-		System.err.println("100% done");
+		if(!quiet)
+			System.err.println("100% done");
 	}
 	
 	private JSONArray fetchJsonMetrics(JSONObject res, long begin, long end) throws IOException, HttpException {
@@ -158,14 +165,20 @@ public class Exporter {
 
 		// Load metric history for all metrics
 		//
-		String url = "/suite-api/api/resources/stats?resourceId=" + resId + "&intervalType=MINUTES&intervalQuantifier="
-				+ conf.getRollupMinutes() + "&rollUpType=AVG" + "&begin=" + begin + "&end=" + end;
+		String url = "/suite-api/api/resources/stats";
+		ArrayList<String> qs = new ArrayList<>();
+		qs.add("resourceId=" + resId);
+		qs.add("intervalType=MINUTES");
+		qs.add("intervalQuantifier=" + conf.getRollupMinutes());
+		qs.add("rollUpType=AVG");
+		qs.add("begin=" + begin);
+		qs.add("end=" + end);
 		for (Config.Field fld : conf.getFields()) {
 			if(fld.getName().startsWith("$parent"))
 				continue;
-			url += "&statKey=" + fld.getName().replaceAll("\\|", "%7C");
+			qs.add("statKey=" + fld.getName().replaceAll("\\|", "%7C"));
 		}
-		JSONObject metricJson = this.getJson(url);
+		JSONObject metricJson = this.getJson(url, qs);
 		JSONArray mr = metricJson.getJSONArray("values");
 		JSONObject statsNode = mr.getJSONObject(0);
 		return statsNode.getJSONObject("stat-list").getJSONArray("stat");
@@ -253,7 +266,7 @@ public class Exporter {
 	}
 	
 	private JSONObject getParentOf(String id, String parentType) throws JSONException, IOException, HttpException {
-		JSONObject json = this.getJson("/suite-api/api/resources/" + id + "/relationships?relationshipType=PARENT");
+		JSONObject json = this.getJson("/suite-api/api/resources/" + id + "/relationships", "relationshipType=PARENT");
 		JSONArray rl = json.getJSONArray("resourceList");
 		for(int i = 0; i < rl.length(); ++i) {
 			JSONObject r = rl.getJSONObject(i);
@@ -323,12 +336,28 @@ public class Exporter {
         }
     }
 
-	private JSONObject getJson(String uri) throws IOException, HttpException {
+	private JSONObject getJson(String uri, String ...queries) throws IOException, HttpException {
+		if(queries != null) {
+			for(int i = 0; i < queries.length; ++i) {
+				uri += i == 0 ? '?' : '&';
+				uri += queries[i];
+			}
+		}
 		HttpGet get = new HttpGet(urlBase + uri);
 		get.addHeader("accept", "application/json");
 		HttpResponse resp = client.execute(get);
 		this.checkResponse(resp);
 		return new JSONObject(EntityUtils.toString(resp.getEntity()));
+	}
+	
+	private JSONObject getJson(String uri, List<String> queries) throws IOException, HttpException {
+		String[] s;
+		if(queries != null) {
+			s = new String[queries.size()];
+			queries.toArray(s);
+		} else
+			s = new String[0];
+		return this.getJson(uri, s);
 	}
 
 	private HttpResponse checkResponse(HttpResponse response)

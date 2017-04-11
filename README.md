@@ -46,6 +46,7 @@ mvn package
 cd target
 chmod +x exporttool.sh
 ./exporttool.sh -d ../samples/vmfields.yaml -u admin -p password -H https://my.vrops.host -i
+```
 
 ## Command syntax
 ```

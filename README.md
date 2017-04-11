@@ -9,7 +9,7 @@ A simple command-line data export tool for vRealize Operations. Currently suppor
 * Java JDK 1.8 installed on the machine where you plan to run the tool
 * vRealize Operations 6.3 or higher
 ### Installation on Linux, Mac or other UNIX-like OS
-1. Download the binaries from here: TODO
+1. Download the binaries from here: https://drive.google.com/open?id=0BymSAYUyWEPuZFdIcjRwMGt2aGs
 2. Unzip the files:
 ```
 mkdir ~/vrops-export

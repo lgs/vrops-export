@@ -33,6 +33,8 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -49,14 +51,18 @@ public class Exporter {
 
 	private String urlBase;
 
-	private final List<SchemaNode> schema = new ArrayList<>();
-
 	private final Map<String, Integer> statPos = new HashMap<>();
 
 	private Exporter parent;
 		
 	private Pattern parentPattern = Pattern.compile("^\\$parent\\:([_A-Za-z][_A-Za-z0-9]*)\\.(.+)$");
-
+	
+	private Pattern parentSpecPattern = Pattern.compile("^([_\\-A-Za-z][_\\-A-Za-z0-9]*):(.+)$");
+	
+	private LRUCache<String, JSONObject> jsonCache = new LRUCache<>(1000);
+	
+	private DateFormat dateFormat;
+	
 	private final ThreadPoolExecutor executor = new ThreadPoolExecutor(5, 5, 10, TimeUnit.SECONDS,
 			new ArrayBlockingQueue<>(20), new ThreadPoolExecutor.CallerRunsPolicy());
 
@@ -91,46 +97,62 @@ public class Exporter {
 		this.client = client;
 		this.urlBase = urlBase;
 		this.conf = conf;
-		// Initialize the schema
-		//
-		this.schema.add(new SchemaNode("timestamp", "timestamp"));
-		this.schema.add(new SchemaNode("resName", "resName"));
+		if(this.conf.getDateFormat() != null)
+			this.dateFormat = new SimpleDateFormat(this.conf.getDateFormat());
 		this.registerFields();
 	}
 	
 	public String getResourceType() {
 		return conf.getResourceType();
 	}
+	
+	public boolean hasProps() {
+		return conf.hasProps();
+	}
 
-	public void exportTo(Writer out, long begin, long end, String namePattern, boolean quiet) throws IOException, HttpException {
+	public void exportTo(Writer out, long begin, long end, String namePattern, String parentSpec, boolean quiet) throws IOException, HttpException, ExporterException {
 		BufferedWriter bw = new BufferedWriter(out);
 
 		// Output table header
 		//
-		boolean first = true;
-		for (SchemaNode sn : this.schema) {
-			if (!first) {
-				bw.write(",");
-			}
-			first = false;
-			bw.write(sn.getAlias());
+		bw.write("timestamp,resName");
+		for (Config.Field fld : this.conf.getFields()) {
+			bw.write(",");
+			bw.write(fld.getAlias());
 		}
 		bw.newLine();
 
-		// Get all objects
-		//
-		String url = "/suite-api/api/resources";
-		ArrayList<String> qs = new ArrayList<>();
-		if(conf.getResourceType() != null) {
-			qs.add("resourceKind=" + conf.getResourceType());
-		}
-		if(namePattern != null) {
-			qs.add("name=" + namePattern);
-		}
-		JSONObject json = this.getJson(url, qs);
-		JSONArray resources = json.getJSONArray("resourceList");
+		JSONArray resources;
+		if(parentSpec != null) {
+			// Lookup parent
+			//
+			Matcher m = parentSpecPattern.matcher(parentSpec);
+			if(!m.matches())
+				throw new ExporterException("Not a valid parent spec: " + parentSpec + ". should be on the form ResourceKind:resourceName");
+			JSONArray pResources = this.fetchResources(m.group(1), m.group(2));
+			if(pResources.length() == 0) 
+				throw new ExporterException("Parent not found");
+			if(pResources.length() > 1)
+				throw new ExporterException("Parent spec is not unique");
+			String pId = pResources.getJSONObject(0).getString("identifier");
+			
+			// Get children
+			//
+			String url = "/suite-api/api/resources/" + pId + "/relationships";
+			resources = this.getJson(url, "relationshipType=CHILD").getJSONArray("resourceList");
+		} else {
+			// Get all objects, possibly filtered by name
+			//
+			resources = this.fetchResources(conf.getResourceType(), namePattern);
+		} 
 		for (int i = 0; i < resources.length(); ++i) {
 			JSONObject res = resources.getJSONObject(i);
+			
+			// Child relationships may return objects of the wrong type, so we have
+			// to check the type here.
+			//
+			if(!res.getJSONObject("resourceKey").getString("resourceKindKey").equals(conf.getResourceType()))
+				continue;
 			this.executor.execute(new Runnable() {
 				@Override
 				public void run() {
@@ -160,6 +182,15 @@ public class Exporter {
 			System.err.println("100% done");
 	}
 	
+	private JSONArray fetchResources(String resourceKind, String name) throws JSONException, IOException, HttpException {
+		String url = "/suite-api/api/resources";
+		ArrayList<String> qs = new ArrayList<>();
+		qs.add("resourceKind=" + resourceKind);
+		if(name != null)
+			qs.add("name=" + name);
+		return this.getJson(url, qs).getJSONArray("resourceList");
+	}
+	
 	private JSONArray fetchJsonMetrics(JSONObject res, long begin, long end) throws IOException, HttpException {
 		String resId = res.getString("identifier");
 
@@ -174,14 +205,29 @@ public class Exporter {
 		qs.add("begin=" + begin);
 		qs.add("end=" + end);
 		for (Config.Field fld : conf.getFields()) {
-			if(fld.getName().startsWith("$parent"))
+			if(!fld.hasMetric()) 
 				continue;
-			qs.add("statKey=" + fld.getName().replaceAll("\\|", "%7C"));
+			if(fld.getMetric().startsWith("$parent"))
+				continue;
+			qs.add("statKey=" + fld.getMetric().replaceAll("\\|", "%7C"));
 		}
 		JSONObject metricJson = this.getJson(url, qs);
 		JSONArray mr = metricJson.getJSONArray("values");
+		
+		// No values? Return an empty array!
+		//
+		if(mr.length() == 0)
+			return new JSONArray();
 		JSONObject statsNode = mr.getJSONObject(0);
 		return statsNode.getJSONObject("stat-list").getJSONArray("stat");
+	}
+	
+	private JSONArray fetchJsonProps(JSONObject res) throws IOException, HttpException {
+		String id = res.getString("identifier");
+		String uri = "/suite-api/api/resources/" + id + "/properties";
+		JSONObject json = this.getJson(uri);
+		JSONArray result = json.getJSONArray("property");
+		return result;
 	}
 
 	private TreeMap<Long, List<Object>> fetchMetrics(JSONObject res, long begin, long end) throws IOException, HttpException {
@@ -191,6 +237,9 @@ public class Exporter {
 		JSONArray myContent = this.fetchJsonMetrics(res, begin, end);
 		List<JSONArray> contentList = new ArrayList<>(2);
 		contentList.add(myContent);
+		List<JSONArray> propList = new ArrayList<>(2);
+		if(conf.hasProps())
+			propList.add(this.fetchJsonProps(res));
 		
 		// Are we fetching metrics from the parent?
 		//
@@ -198,18 +247,37 @@ public class Exporter {
 			// Fetch metrics
 			//
 			JSONObject p = this.getParentOf(resId, parent.getResourceType());
-			JSONArray parentContent = parent.fetchJsonMetrics(res, begin, end);
 			
-			// Splice with rest of metrics
+			// Proceed only if parent was found
 			//
-			// Put metric names back on the $parent:ResourceKind.metric form
-			//
-			for (int j = 0; j < parentContent.length(); ++j) {
-				JSONObject contentNode = parentContent.getJSONObject(j);
-				JSONObject statKey = contentNode.getJSONObject("statKey");
-				statKey.put("key", "$parent:" + parent.getResourceType() + "." + statKey.getString("key"));
+			if(p != null) {
+				JSONArray parentContent = parent.fetchJsonMetrics(p, begin, end);
+				
+				// Splice with rest of metrics
+				//
+				// Put metric names back on the $parent:ResourceKind.metric form
+				//
+				for (int j = 0; j < parentContent.length(); ++j) {
+					JSONObject contentNode = parentContent.getJSONObject(j);
+					JSONObject statKey = contentNode.getJSONObject("statKey");
+					statKey.put("key", "$parent:" + parent.getResourceType() + "." + statKey.getString("key"));
+				}
+				contentList.add(parentContent);
+				
+				// Handle parent properties
+				//
+				if(parent.hasProps()) {
+					JSONArray parentProps = this.fetchJsonProps(p);
+					
+					// Put property names back on the $parent:ResourceKind.metric form
+					//
+					for (int j = 0; j < parentProps.length(); ++j) {
+						JSONObject pp = parentProps.getJSONObject(j);
+						pp.put("name", "$parent:" + parent.getResourceType() + "." + pp.getString("name"));
+					}
+					propList.add(parentProps);
+				}
 			}
-			contentList.add(parentContent);
 		}
 
 		// It's really just the fetching we're interested in running in
@@ -261,6 +329,26 @@ public class Exporter {
 					}
 				}
 			}
+			
+			// Handle properties
+			// TODO: Could be optimized by filling a sparse vector with the properties
+			// and copying it to each row.
+			//
+			for(JSONArray props : propList) {
+				for(List<Object> row : rows.values()) {
+					for(int i = 0; i < props.length(); ++i) {
+						JSONObject propBundle = props.getJSONObject(i);
+						String name = propBundle.getString("name");
+						if(!statPos.containsKey(name))
+							continue;
+						int idx = statPos.get(name);
+						while (row.size() <= idx) {
+							row.add(null);
+						}
+						row.set(idx, propBundle.get("value"));
+					}
+				}
+			}
 		}
 		return rows;
 	}
@@ -285,24 +373,34 @@ public class Exporter {
 			// Done collecting data, now write it!
 			//
 			for (Map.Entry<Long, List<Object>> entry : rows.entrySet()) {
-				boolean first = true;
-				for (Object o : entry.getValue()) {
-					if (!first) {
-						bw.write(",");
-					}
-					first = false;
+				Iterator<Object> itor = entry.getValue().iterator();
+				
+				// Deal with timestamp
+				//
+				long t = (long) itor.next();
+				if(dateFormat != null) {
+					bw.write("\"" + dateFormat.format(new Date(t)) + "\"");
+				} else
+					bw.write("\"" + t + "\"");
+				while(itor.hasNext()) {
+					Object o = itor.next();
+					bw.write(",\"");
 					bw.write(o != null ? o.toString() : "");
+					bw.write('"');
 				}
 				bw.newLine();
 			}
+			bw.flush();
 		}
 	}
 
 	private void registerFields() throws IOException, HttpException, ExporterException {
 		String parentType = null;
     	List<Config.Field> parentFields = new ArrayList<Config.Field>();
+    	int pos = 2; // Advance past timestamp and resource name
         for(Config.Field fld : conf.getFields()) {
-        	String name = fld.getName();
+        	boolean isMetric = fld.hasMetric();
+        	String name = isMetric ? fld.getMetric() : fld.getProp();
         	
         	// Parse parent reference if present.
         	//
@@ -314,12 +412,12 @@ public class Exporter {
         		} else if(!pn.equals(parentType)) 
         			throw new ExporterException("References to multiple parents not supported");
         		String fn = m.group(2);
-        		parentFields.add(new Config.Field(fld.getAlias(), fn));
+        		parentFields.add(new Config.Field(fld.getAlias(), fn, isMetric));
         	}
-            if(statPos.get(fld.getName()) == null) {
-                schema.add(new SchemaNode(name, fld.getAlias()));
-                statPos.put(name, schema.size() - 1);
+            if(statPos.get(fld.getMetric()) == null) {
+                statPos.put(name, pos);
             }
+            ++pos;
         }
         
         // Handle parent fields
@@ -343,11 +441,20 @@ public class Exporter {
 				uri += queries[i];
 			}
 		}
+		synchronized(jsonCache) {
+			if(jsonCache.containsKey(uri)) {
+				return jsonCache.get(uri);
+			}
+		}
 		HttpGet get = new HttpGet(urlBase + uri);
 		get.addHeader("accept", "application/json");
 		HttpResponse resp = client.execute(get);
 		this.checkResponse(resp);
-		return new JSONObject(EntityUtils.toString(resp.getEntity()));
+		JSONObject result = new JSONObject(EntityUtils.toString(resp.getEntity()));
+		synchronized(jsonCache) {
+			jsonCache.put(uri, result);
+		}
+		return result;
 	}
 	
 	private JSONObject getJson(String uri, List<String> queries) throws IOException, HttpException {

@@ -1,29 +1,36 @@
 resourceType: VirtualMachine
 rollupType: AVG
 rollupMinutes: 5
+dateFormat: YYYY-MM-dd HH:mm:ss
 fields:
 # CPU fields
   - alias: cpuDemand
-    name: cpu|demandPct
+    metric: cpu|demandPct
   - alias: cpuReady
-    name: cpu|readyPct
+    metric: cpu|readyPct
   - alias: cpuCostop
-    name: cpu|costopPct
+    metric: cpu|costopPct
 # Memory fields
   - alias: memDemand
-    name: mem|object.demand
+    metric: mem|object.demand
   - alias: memSwapOut
-    name: mem|swapoutRate_average
+    metric: mem|swapoutRate_average
   - alias: memSwapIn
-    name: mem|swapinRate_average
+    metric: mem|swapinRate_average
  # Storage fields
   - alias: storageDemandKbps
-    name: storage|demandKBps
+    metric: storage|demandKBps
  # Network fields
   - alias: netBytesRx
-    name: net|bytesRx_average
+    metric: net|bytesRx_average
   - alias: netBytesTx
-    name: net|bytesTx_average
+    metric: net|bytesTx_average
  # Host CPU
   - alias: hostCPUDemand
-    name: $parent:HostSystem.cpu|demandmhz
+    metric: $parent:HostSystem.cpu|demandmhz
+ # Guest OS
+  - alias: guestOS
+    prop: config|guestFullName
+ # Host CPU type
+  - alias: hostCPUType
+    prop: $parent:HostSystem.cpu|cpuModel

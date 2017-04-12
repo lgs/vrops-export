@@ -18,7 +18,9 @@ unzip vrops-export-<version>-bin.zip
 cd vrops-export-<version>/bin
 ```
 3. Make the start script runnable
-```chmod +x exporttool.sh```
+```
+chmod +x exporttool.sh
+```
 4. Run it!
 ```
 ./exporttool.sh -d samples/vmfields.yaml -u admin -p password -H https://my.vrops.host -i
@@ -52,7 +54,7 @@ chmod +x exporttool.sh
 ```
 usage: exporttool [-d <arg>] [-H <arg>] [-h] [-i] [-l <arg>] [-n <arg>]
        [-o <arg>] [-p <arg>] [-q] [-u <arg>]
-Exports vRealize Operations Metrics
+       
  -d,--definition <arg>   Path to definition file
  -H,--host <arg>         URL to vRealize Operations Host
  -h,--help               Print a short help
@@ -60,9 +62,53 @@ Exports vRealize Operations Metrics
  -l,--lookback <arg>     Lookback time
  -n,--namequery <arg>    Name query
  -o,--output <arg>       Output file
+ -P,--parent <arg>       Parent resource (ResourceKind:resourceName)
  -p,--password <arg>     Password
  -q,--quiet              Quiet mode (no progress counter)
  -u,--username <arg>     Username
  ```
+ 
+ ## Definition file
+ The details on what fields to export and how to treat them is expressed in the definition file. This file follows the YAML format. 
+ Here is an example of a definition file:
+ 
+ ```
+resourceType: VirtualMachine                     # The resource type we're exporting
+rollupType: AVG                                  # Rollup type: AVG, MAX, MIN, SUM, LATEST, COUNT
+rollupMinutes: 5                                 # Time scale granularity in minutes
+dateFormat: YYYY-MM-dd HH:mm:ss                  # Date format. See http://tinyurl.com/pscdf9g
+fields:                                          # A list of fields
+# CPU fields
+  - alias: cpuDemand                             # Name of the field in the output
+    metric: cpu|demandPct                        # Reference to a metric field in vR Ops
+  - alias: cpuReady
+    metric: cpu|readyPct
+  - alias: cpuCostop
+    metric: cpu|costopPct
+# Memory fields
+  - alias: memDemand
+    metric: mem|object.demand
+  - alias: memSwapOut
+    metric: mem|swapoutRate_average
+  - alias: memSwapIn
+    metric: mem|swapinRate_average
+ # Storage fields
+  - alias: storageDemandKbps
+    metric: storage|demandKBps
+ # Network fields
+  - alias: netBytesRx
+    metric: net|bytesRx_average
+  - alias: netBytesTx
+    metric: net|bytesTx_average
+ # Host CPU
+  - alias: hostCPUDemand
+    metric: $parent:HostSystem.cpu|demandmhz     # Reference to a metric in the parent. 
+ # Guest OS
+  - alias: guestOS
+    prop: config|guestFullName                   # Reference to a property (as opposed to metric)
+ # Host CPU type
+  - alias: hostCPUType
+    prop: $parent:HostSystem.cpu|cpuModel        # Reference to a metric in a parent
+```
 
 

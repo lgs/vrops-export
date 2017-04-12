@@ -56,7 +56,15 @@ public class Main {
     		String lb = commandLine.getOptionValue('l');
     		boolean trustCerts = commandLine.hasOption('i');
     		String namePattern = commandLine.getOptionValue('n');
+    		String parentSpec = commandLine.getOptionValue('P');
+    		if(namePattern != null && parentSpec != null) 
+    			throw new ExporterException("Name filter is not supported with parent is specified");
     		boolean quiet = commandLine.hasOption('q');
+    		
+    		// Output to stdout implies quiet mode
+    		//
+    		if(output == null)
+    			quiet = true;
     		
     		// Read definition and run it!
     		//
@@ -68,7 +76,7 @@ public class Main {
 		        long end = System.currentTimeMillis();
 		        long begin = end - lbMs;
 		        Writer wrt = output != null ? new FileWriter(output) : new OutputStreamWriter(System.out);
-		        exporter.exportTo(wrt, begin, end, namePattern, quiet);
+		        exporter.exportTo(wrt, begin, end, namePattern, parentSpec, quiet);
 	    	} finally {
 	    		fr.close();
 	    	}
@@ -87,6 +95,7 @@ public class Main {
 		opts.addOption("d", "definition", true, "Path to definition file");
 		opts.addOption("l", "lookback", true, "Lookback time");
 		opts.addOption("n", "namequery", true, "Name query");
+		opts.addOption("P", "parent", true, "Parent resource (ResourceKind:resourceName)");
 		opts.addOption("u", "username", true, "Username");
 		opts.addOption("p", "password", true, "Password");
 		opts.addOption("o", "output", true, "Output file");
@@ -95,7 +104,7 @@ public class Main {
 		opts.addOption("i", "ignore-cert", false, "Trust any cert");
 		opts.addOption("h", "help", false, "Print a short help");
 		return opts;
-	}
+	}		
     
     private static long parseLookback(String lb) throws ExporterException {
     	long scale = 1;

@@ -4,6 +4,8 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 
 import javax.net.ssl.SSLException;
 
@@ -13,10 +15,11 @@ import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
-import org.apache.commons.cli.PosixParser;
 
 public class Main {
     public static void main(String[] args) throws Exception {
+    	for(String s : args) 
+    		System.out.println(s);
     	// Parse command line
     	//
     	CommandLineParser parser = new DefaultParser();
@@ -25,7 +28,7 @@ public class Main {
     	try {
     		commandLine = parser.parse(opts, args);
     	} catch(ParseException e) {
-    		System.err.println("Error parsing command. Use -h option for help");
+    		System.err.println("Error parsing command. Use -h option for help. Details: " + e.getMessage());
     		System.exit(1);
     	}
     	// Help requested?
@@ -53,7 +56,16 @@ public class Main {
     		if(host == null)
     			throw new ExporterException("Host URL must be specified");
     		String output = commandLine.getOptionValue('o');
+    		
+    		// Deal with lookback/time period
+    		//
     		String lb = commandLine.getOptionValue('l');
+    		String startS = commandLine.getOptionValue('s');
+    		String endS = commandLine.getOptionValue('e');
+    		if(lb != null && (endS != null || startS != null)) 
+    			throw new ExporterException("Lookback and start/end can't be specified at the same time");
+    		if(startS != null ^ endS != null)	    			
+    			throw new ExporterException("Both start and end must be specified");
     		boolean trustCerts = commandLine.hasOption('i');
     		String namePattern = commandLine.getOptionValue('n');
     		String parentSpec = commandLine.getOptionValue('P');
@@ -71,10 +83,24 @@ public class Main {
 	    	FileReader fr = new FileReader(defFile);
 	    	try {
 		    	Config conf = ConfigLoader.parse(fr);
-		        Exporter exporter = new Exporter(host, username, password, trustCerts, conf);
-		        long lbMs = lb != null ? parseLookback(lb) : 1000L * 60L * 60L * 24L;
+		    	
+		    	// Deal with start and end dates
+		    	//
 		        long end = System.currentTimeMillis();
-		        long begin = end - lbMs;
+	        	long lbMs = lb != null ? parseLookback(lb) : 1000L * 60L * 60L * 24L;
+	        	long begin = end - lbMs;
+	        	if(startS != null) {
+	        		if(conf.getDateFormat() == null)
+	        			throw new ExporterException("Date format must be specified in config file if -e and -s are used");
+	        		DateFormat df = new SimpleDateFormat(conf.getDateFormat());
+	        		try {
+	        			end = df.parse(endS).getTime();
+	        			begin = df.parse(startS).getTime();
+	        		} catch(java.text.ParseException e) {
+	        			throw new ExporterException(e.getMessage());
+	        		}
+	        	}
+		        Exporter exporter = new Exporter(host, username, password, trustCerts, conf);
 		        Writer wrt = output != null ? new FileWriter(output) : new OutputStreamWriter(System.out);
 		        exporter.exportTo(wrt, begin, end, namePattern, parentSpec, quiet);
 	    	} finally {
@@ -94,6 +120,8 @@ public class Main {
 		Options opts = new Options();
 		opts.addOption("d", "definition", true, "Path to definition file");
 		opts.addOption("l", "lookback", true, "Lookback time");
+		opts.addOption("s", "start", true, "Time period start (date format in definition file)");
+		opts.addOption("e", "end", true, "Time period end (date format in definition file)");
 		opts.addOption("n", "namequery", true, "Name query");
 		opts.addOption("P", "parent", true, "Parent resource (ResourceKind:resourceName)");
 		opts.addOption("u", "username", true, "Username");

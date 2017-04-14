@@ -6,4 +6,4 @@ then
 else
 	JAVA="$JAVA_HOME/bin/java"
 fi
-$JAVA -Djsse.enableSNIExtension=false -jar $DIR/vrops-export-*.jar $*
+$JAVA -Djsse.enableSNIExtension=false -jar $DIR/vrops-export-*.jar "$@"

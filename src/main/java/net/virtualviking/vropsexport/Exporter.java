@@ -269,7 +269,7 @@ public class Exporter {
 				if(parent.hasProps()) {
 					JSONArray parentProps = this.fetchJsonProps(p);
 					
-					// Put property names back on the $parent:ResourceKind.metric form
+					// Put property names back on the $parent:ResourceKind.prop form
 					//
 					for (int j = 0; j < parentProps.length(); ++j) {
 						JSONObject pp = parentProps.getJSONObject(j);

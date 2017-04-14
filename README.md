@@ -76,7 +76,7 @@ usage: exporttool [-d <arg>] [-H <arg>] [-h] [-i] [-l <arg>] [-n <arg>]
 resourceType: VirtualMachine                     # The resource type we're exporting
 rollupType: AVG                                  # Rollup type: AVG, MAX, MIN, SUM, LATEST, COUNT
 rollupMinutes: 5                                 # Time scale granularity in minutes
-dateFormat: YYYY-MM-dd HH:mm:ss                  # Date format. See http://tinyurl.com/pscdf9g
+dateFormat: yyyy-MM-dd HH:mm:ss                  # Date format. See http://tinyurl.com/pscdf9g
 fields:                                          # A list of fields
 # CPU fields
   - alias: cpuDemand                             # Name of the field in the output
@@ -102,13 +102,13 @@ fields:                                          # A list of fields
     metric: net|bytesTx_average
  # Host CPU
   - alias: hostCPUDemand
-    metric: $parent:HostSystem.cpu|demandmhz     # Reference to a metric in the parent. 
+    metric: $parent:HostSystem.cpu|demandmhz	# Reference to a metric in the parent. 
  # Guest OS
   - alias: guestOS
-    prop: config|guestFullName                   # Reference to a property (as opposed to metric)
+    prop: config|guestFullName			# Reference to a property (as opposed to metric)
  # Host CPU type
   - alias: hostCPUType
-    prop: $parent:HostSystem.cpu|cpuModel        # Reference to a metric in a parent
-```
+    prop: $parent:HostSystem.cpu|cpuModel		# Reference to a metric in a parent
+
 
 

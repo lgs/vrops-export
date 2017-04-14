@@ -18,8 +18,6 @@ import org.apache.commons.cli.ParseException;
 
 public class Main {
     public static void main(String[] args) throws Exception {
-    	for(String s : args) 
-    		System.out.println(s);
     	// Parse command line
     	//
     	CommandLineParser parser = new DefaultParser();

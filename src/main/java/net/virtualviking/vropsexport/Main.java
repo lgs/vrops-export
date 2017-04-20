@@ -41,9 +41,7 @@ public class Main {
     	try {
     		// Extract command options and do sanity checks.
     		//
-    		String defFile = commandLine.getOptionValue('d');
-    		if(defFile == null) 
-    			throw new ExporterException("Definition file must be specified");
+    		
     		String username = commandLine.getOptionValue('u');
     		if(username == null)
     			throw new ExporterException("Username must be specified");
@@ -54,56 +52,69 @@ public class Main {
     		if(host == null)
     			throw new ExporterException("Host URL must be specified");
     		String output = commandLine.getOptionValue('o');
-    		
-    		// Deal with lookback/time period
-    		//
-    		String lb = commandLine.getOptionValue('l');
-    		String startS = commandLine.getOptionValue('s');
-    		String endS = commandLine.getOptionValue('e');
-    		if(lb != null && (endS != null || startS != null)) 
-    			throw new ExporterException("Lookback and start/end can't be specified at the same time");
-    		if(startS != null ^ endS != null)	    			
-    			throw new ExporterException("Both start and end must be specified");
     		boolean trustCerts = commandLine.hasOption('i');
-    		String namePattern = commandLine.getOptionValue('n');
-    		String parentSpec = commandLine.getOptionValue('P');
-    		if(namePattern != null && parentSpec != null) 
-    			throw new ExporterException("Name filter is not supported with parent is specified");
-    		boolean quiet = commandLine.hasOption('q');
     		
-    		// Output to stdout implies quiet mode
+    		// If we're just printing field names, we have enough parameters at this point.
     		//
-    		if(output == null)
-    			quiet = true;
+    		String resourceKind = commandLine.getOptionValue('F');
+    		if(resourceKind != null) {
+    			Exporter exporter = new Exporter(host, username, password, trustCerts, null);
+    			exporter.printResourceMetadata(resourceKind, System.out);
+    		} else {
     		
-    		// Read definition and run it!
-    		//
-	    	FileReader fr = new FileReader(defFile);
-	    	try {
-		    	Config conf = ConfigLoader.parse(fr);
-		    	
-		    	// Deal with start and end dates
-		    	//
-		        long end = System.currentTimeMillis();
-	        	long lbMs = lb != null ? parseLookback(lb) : 1000L * 60L * 60L * 24L;
-	        	long begin = end - lbMs;
-	        	if(startS != null) {
-	        		if(conf.getDateFormat() == null)
-	        			throw new ExporterException("Date format must be specified in config file if -e and -s are used");
-	        		DateFormat df = new SimpleDateFormat(conf.getDateFormat());
-	        		try {
-	        			end = df.parse(endS).getTime();
-	        			begin = df.parse(startS).getTime();
-	        		} catch(java.text.ParseException e) {
-	        			throw new ExporterException(e.getMessage());
-	        		}
-	        	}
-		        Exporter exporter = new Exporter(host, username, password, trustCerts, conf);
-		        Writer wrt = output != null ? new FileWriter(output) : new OutputStreamWriter(System.out);
-		        exporter.exportTo(wrt, begin, end, namePattern, parentSpec, quiet);
-	    	} finally {
-	    		fr.close();
-	    	}
+	    		String defFile = commandLine.getOptionValue('d');
+	    		if(defFile == null) 
+	    			throw new ExporterException("Definition file must be specified");
+	    		
+	    		// Deal with lookback/time period
+	    		//
+	    		String lb = commandLine.getOptionValue('l');
+	    		String startS = commandLine.getOptionValue('s');
+	    		String endS = commandLine.getOptionValue('e');
+	    		if(lb != null && (endS != null || startS != null)) 
+	    			throw new ExporterException("Lookback and start/end can't be specified at the same time");
+	    		if(startS != null ^ endS != null)	    			
+	    			throw new ExporterException("Both start and end must be specified");
+	    		String namePattern = commandLine.getOptionValue('n');
+	    		String parentSpec = commandLine.getOptionValue('P');
+	    		if(namePattern != null && parentSpec != null) 
+	    			throw new ExporterException("Name filter is not supported with parent is specified");
+	    		boolean quiet = commandLine.hasOption('q');
+	    		
+	    		// Output to stdout implies quiet mode
+	    		//
+	    		if(output == null)
+	    			quiet = true;
+	    		
+	    		// Read definition and run it!
+	    		//
+		    	FileReader fr = new FileReader(defFile);
+		    	try {
+			    	Config conf = ConfigLoader.parse(fr);
+			    	
+			    	// Deal with start and end dates
+			    	//
+			        long end = System.currentTimeMillis();
+		        	long lbMs = lb != null ? parseLookback(lb) : 1000L * 60L * 60L * 24L;
+		        	long begin = end - lbMs;
+		        	if(startS != null) {
+		        		if(conf.getDateFormat() == null)
+		        			throw new ExporterException("Date format must be specified in config file if -e and -s are used");
+		        		DateFormat df = new SimpleDateFormat(conf.getDateFormat());
+		        		try {
+		        			end = df.parse(endS).getTime();
+		        			begin = df.parse(startS).getTime();
+		        		} catch(java.text.ParseException e) {
+		        			throw new ExporterException(e.getMessage());
+		        		}
+		        	}
+			        Exporter exporter = new Exporter(host, username, password, trustCerts, conf);
+			        Writer wrt = output != null ? new FileWriter(output) : new OutputStreamWriter(System.out);
+			        exporter.exportTo(wrt, begin, end, namePattern, parentSpec, quiet);
+		    	} finally {
+		    		fr.close();
+		    	}
+    		}
     	} catch(ExporterException e) {
     		System.err.println("ERROR: " + e.getMessage());
     		System.exit(1);
@@ -128,6 +139,7 @@ public class Main {
 		opts.addOption("H", "host", true, "URL to vRealize Operations Host");
 		opts.addOption("q", "quiet", false, "Quiet mode (no progress counter)");
 		opts.addOption("i", "ignore-cert", false, "Trust any cert");
+		opts.addOption("F", "list-fields", true, "Print name and keys of all fields to stdout");
 		opts.addOption("h", "help", false, "Print a short help");
 		return opts;
 	}		

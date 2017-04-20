@@ -12,7 +12,7 @@ fields:
     metric: cpu|costopPct
 # Memory fields
   - alias: memDemand
-    metric: mem|guest_demand
+    metric: mem|guestDemand
   - alias: memSwapOut
     metric: mem|swapoutRate_average
   - alias: memSwapIn

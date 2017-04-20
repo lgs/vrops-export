@@ -55,17 +55,21 @@ chmod +x exporttool.sh
 usage: exporttool [-d <arg>] [-H <arg>] [-h] [-i] [-l <arg>] [-n <arg>]
        [-o <arg>] [-p <arg>] [-q] [-u <arg>]
        
- -d,--definition <arg>   Path to definition file
- -H,--host <arg>         URL to vRealize Operations Host
- -h,--help               Print a short help
- -i,--ignore-cert        Trust any cert
- -l,--lookback <arg>     Lookback time
- -n,--namequery <arg>    Name query
- -o,--output <arg>       Output file
- -P,--parent <arg>       Parent resource (ResourceKind:resourceName)
- -p,--password <arg>     Password
- -q,--quiet              Quiet mode (no progress counter)
- -u,--username <arg>     Username
+ -d,--definition <arg>    Path to definition file
+ -e,--end <arg>           Time period end (date format in definition file)
+ -F,--list-fields <arg>   Print name and keys of all fields to stdout
+ -H,--host <arg>          URL to vRealize Operations Host
+ -h,--help                Print a short help
+ -i,--ignore-cert         Trust any cert
+ -l,--lookback <arg>      Lookback time
+ -n,--namequery <arg>     Name query
+ -o,--output <arg>        Output file
+ -P,--parent <arg>        Parent resource (ResourceKind:resourceName)
+ -p,--password <arg>      Password
+ -q,--quiet               Quiet mode (no progress counter)
+ -s,--start <arg>         Time period start (date format in definition file)
+ -u,--username <arg>      Username
+
  ```
  
  ## Definition file
@@ -109,6 +113,10 @@ fields:                                          # A list of fields
  # Host CPU type
   - alias: hostCPUType
     prop: $parent:HostSystem.cpu|cpuModel		# Reference to a metric in a parent
+    
+## Known issues
+Very long time ranges in combination with small interval sizes can cause the server to prematurely close the connection, resulting in NoHttpResponseExceptions to be thrown.
+ If this happens, consider shortening the time range.
 
 
 

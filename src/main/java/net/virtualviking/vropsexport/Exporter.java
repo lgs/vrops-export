@@ -9,23 +9,35 @@ import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.HttpClient;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.config.Registry;
+import org.apache.http.config.RegistryBuilder;
+import org.apache.http.conn.socket.ConnectionSocketFactory;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
 import org.apache.http.conn.ssl.TrustStrategy;
+import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.impl.client.DefaultHttpRequestRetryHandler;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.client.HttpClients;
+import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.ssl.SSLContexts;
 import org.apache.http.util.EntityUtils;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import net.virtualviking.vropsexport.processors.CSVPrinter;
+
 import javax.net.ssl.SSLContext;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.PrintStream;
 import java.io.Writer;
 import java.nio.charset.Charset;
 import java.security.KeyManagementException;
@@ -42,7 +54,22 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class Exporter {
+public class Exporter implements DataProvider {
+	private class Progress implements ProgressMonitor {
+		private final int totalRows;
+		
+		private int rowsProcessed = 0;
+		
+		public Progress(int totalRows) {
+			this.totalRows = totalRows;
+		}
+		
+		public synchronized void reportProgress(int n) {
+			this.rowsProcessed += n;
+			int pct = (100 * rowsProcessed) / totalRows;
+			System.err.print("" + pct + "% done\r");
+		}
+	}
 	private static Log log = LogFactory.getLog(Exporter.class);
 
 	private Config conf;
@@ -52,25 +79,47 @@ public class Exporter {
 	private String urlBase;
 
 	private final Map<String, Integer> statPos = new HashMap<>();
-
-	private Exporter parent;
+	
+	private final LRUCache<String, String> nameCache = new LRUCache<>(1000);
 		
 	private Pattern parentPattern = Pattern.compile("^\\$parent\\:([_A-Za-z][_A-Za-z0-9]*)\\.(.+)$");
 	
 	private Pattern parentSpecPattern = Pattern.compile("^([_\\-A-Za-z][_\\-A-Za-z0-9]*):(.+)$");
 	
+	private Pattern adapterAndResourceKindPattern = Pattern.compile("^([_\\-A-Za-z][_\\-A-Za-z0-9]*):(.+)$");
+	
 	private LRUCache<String, JSONObject> jsonCache = new LRUCache<>(1000);
+	
+	private LRUCache<String, Rowset> rowsetCache = new LRUCache<>(200); 
 	
 	private DateFormat dateFormat;
 	
-	private final ThreadPoolExecutor executor = new ThreadPoolExecutor(5, 5, 10, TimeUnit.SECONDS,
+	private static final int MAX_RESPONSE_ROWS = 100000; // TODO: This is a wild guess. It seems vR Ops barfs on responses that are too long.
+	
+	private static final int MAX_CHUNKSIZE = 10;
+	
+	private static final int CONNTECTION_TIMEOUT_MS = 60000;
+	
+	private static final int CONNECTION_REQUEST_TIMEOUT_MS = 60000;
+	
+	private static final int SOCKET_TIMEOUT_MS = 60000;
+	
+	private final ThreadPoolExecutor executor = new ThreadPoolExecutor(5, 5, 5, TimeUnit.SECONDS,
 			new ArrayBlockingQueue<>(20), new ThreadPoolExecutor.CallerRunsPolicy());
 
 	public Exporter(String urlBase, String username, String password, boolean unsafeSsl, Config conf)
 			throws IOException, HttpException, KeyStoreException, NoSuchAlgorithmException, KeyManagementException, ExporterException {
 		CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
 		credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
-
+		
+		// Configure timeout
+		//
+		final RequestConfig requestConfig = RequestConfig.custom()
+			    .setConnectTimeout(CONNTECTION_TIMEOUT_MS)
+			    .setConnectionRequestTimeout(CONNECTION_REQUEST_TIMEOUT_MS)
+			    .setSocketTimeout(SOCKET_TIMEOUT_MS)
+			    .build();
+		
 		// Disable SSL/TLS checks if requested
 		//
 		if (unsafeSsl) {
@@ -79,17 +128,28 @@ public class Exporter {
 					return true;
 				}
 			}).build();
-			this.client = HttpClients.custom()
-					.setSSLSocketFactory(new SSLConnectionSocketFactory(sslContext, NoopHostnameVerifier.INSTANCE))
-					.setDefaultCredentialsProvider(credentialsProvider)
-					.setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE).build();
+			SSLConnectionSocketFactory sslf = new SSLConnectionSocketFactory(sslContext, NoopHostnameVerifier.INSTANCE);
+			Registry<ConnectionSocketFactory> socketFactoryRegistry = RegistryBuilder.<ConnectionSocketFactory> create().register("https", sslf).build();
+			PoolingHttpClientConnectionManager cm = new PoolingHttpClientConnectionManager(socketFactoryRegistry);
+			cm.setMaxTotal(200);
+			cm.setDefaultMaxPerRoute(20);
+			this.client = HttpClients.custom().
+					setSSLSocketFactory(sslf).
+					setDefaultCredentialsProvider(credentialsProvider).
+					setConnectionManager(cm).
+				    setDefaultRequestConfig(requestConfig).
+					setRetryHandler(new DefaultHttpRequestRetryHandler(3, false)).
+					setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE).build();
 		} else {
-			this.client = HttpClientBuilder.create().setDefaultCredentialsProvider(credentialsProvider).build();
+			PoolingHttpClientConnectionManager cm = new PoolingHttpClientConnectionManager();
+			cm.setMaxTotal(200);
+			cm.setDefaultMaxPerRoute(20);
+			this.client = HttpClientBuilder.create().
+					setConnectionManager(cm).
+					setDefaultRequestConfig(requestConfig).
+					setRetryHandler(new DefaultHttpRequestRetryHandler(3, false)).
+					setDefaultCredentialsProvider(credentialsProvider).build();
 		}
-		this.init(urlBase, client, conf);
-	}
-
-	private Exporter(String urlBase, HttpClient client, Config conf) throws IOException, HttpException, ExporterException {
 		this.init(urlBase, client, conf);
 	}
 
@@ -97,9 +157,15 @@ public class Exporter {
 		this.client = client;
 		this.urlBase = urlBase;
 		this.conf = conf;
-		if(this.conf.getDateFormat() != null)
-			this.dateFormat = new SimpleDateFormat(this.conf.getDateFormat());
-		this.registerFields();
+		
+		// Calling this with a null conf is only valid if we're printing field names and nothing else. 
+		// Everything else will crash miserably! (Yeah, this is a bit of a hack...)
+		//
+		if(conf != null) {
+			if(this.conf.getDateFormat() != null)
+				this.dateFormat = new SimpleDateFormat(this.conf.getDateFormat());
+			this.registerFields();
+		}
 	}
 	
 	public String getResourceType() {
@@ -112,6 +178,7 @@ public class Exporter {
 
 	public void exportTo(Writer out, long begin, long end, String namePattern, String parentSpec, boolean quiet) throws IOException, HttpException, ExporterException {
 		BufferedWriter bw = new BufferedWriter(out);
+		Progress progress = null;
 
 		// Output table header
 		//
@@ -122,6 +189,7 @@ public class Exporter {
 		}
 		bw.newLine();
 
+		RowMetadata meta = new RowMetadata(conf);
 		JSONArray resources;
 		if(parentSpec != null) {
 			// Lookup parent
@@ -145,27 +213,32 @@ public class Exporter {
 			//
 			resources = this.fetchResources(conf.getResourceType(), namePattern);
 		} 
+		// Initialize progress reporting
+		//
+		if(!quiet) {
+			progress = new Progress(resources.length());
+			progress.reportProgress(0);
+		}
+		// Canculate a suitable chunk size by assuming that responses should be kept shorter than MAX_RESPONSE_ROWS.
+		//
+		long estimatedRows = conf.getFields().length * (end - begin) / (conf.getRollupMinutes() * 60000);
+		int chunkSize = (int) Math.min(Math.max(MAX_RESPONSE_ROWS / estimatedRows, 1), MAX_CHUNKSIZE);
+		ArrayList<JSONObject> chunk = new ArrayList<>(chunkSize);
 		for (int i = 0; i < resources.length(); ++i) {
 			JSONObject res = resources.getJSONObject(i);
-			
-			// Child relationships may return objects of the wrong type, so we have
-			// to check the type here.
-			//
-			if(!res.getJSONObject("resourceKey").getString("resourceKindKey").equals(conf.getResourceType()))
-				continue;
-			this.executor.execute(new Runnable() {
-				@Override
-				public void run() {
-					try {
-						handleResource(bw, res, begin, end);
-					} catch (Exception e) {
-						log.error("Error while processing resource", e);
-					}
-				}
-			});
-			if(!quiet) {
-				int pct = (100 * i) / resources.length();
-				System.err.print("" + pct + "% done\r");
+			synchronized(nameCache) {
+				nameCache.put(res.getString("identifier"), res.getJSONObject("resourceKey").getString("name"));
+			}
+			chunk.add(res);
+			if(chunk.size() >= chunkSize || i == resources.length() - 1) { 
+				
+				// Child relationships may return objects of the wrong type, so we have
+				// to check the type here.
+				//
+				if(!res.getJSONObject("resourceKey").getString("resourceKindKey").equals(conf.getResourceType()))
+					continue;
+				this.startChunkJob(bw, chunk, meta, begin, end, progress);
+				chunk = new ArrayList<>(chunkSize);
 			}
 		}
 		executor.shutdown();
@@ -182,6 +255,19 @@ public class Exporter {
 			System.err.println("100% done");
 	}
 	
+	private void startChunkJob(BufferedWriter bw, List<JSONObject> chunk, RowMetadata meta, long begin, long end, Progress progress) {
+		this.executor.execute(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					handleResources(bw, chunk, meta, begin, end, progress);
+				} catch (Exception e) {
+					log.error("Error while processing resource", e);
+				}
+			}
+		});
+	}
+	
 	private JSONArray fetchResources(String resourceKind, String name) throws JSONException, IOException, HttpException {
 		String url = "/suite-api/api/resources";
 		ArrayList<String> qs = new ArrayList<>();
@@ -191,169 +277,54 @@ public class Exporter {
 		return this.getJson(url, qs).getJSONArray("resourceList");
 	}
 	
-	private JSONArray fetchJsonMetrics(JSONObject res, long begin, long end) throws IOException, HttpException {
-		String resId = res.getString("identifier");
-
-		// Load metric history for all metrics
-		//
-		String url = "/suite-api/api/resources/stats";
-		ArrayList<String> qs = new ArrayList<>();
-		qs.add("resourceId=" + resId);
-		qs.add("intervalType=MINUTES");
-		qs.add("intervalQuantifier=" + conf.getRollupMinutes());
-		qs.add("rollUpType=AVG");
-		qs.add("begin=" + begin);
-		qs.add("end=" + end);
-		for (Config.Field fld : conf.getFields()) {
-			if(!fld.hasMetric()) 
-				continue;
-			if(fld.getMetric().startsWith("$parent"))
-				continue;
-			qs.add("statKey=" + fld.getMetric().replaceAll("\\|", "%7C"));
+	public String getResourceName(String resourceId) throws JSONException, IOException, HttpException {
+		synchronized(nameCache) {
+			String name = nameCache.get(resourceId);
+			if(name != null)
+				return name;
 		}
-		JSONObject metricJson = this.getJson(url, qs);
-		JSONArray mr = metricJson.getJSONArray("values");
-		
-		// No values? Return an empty array!
-		//
-		if(mr.length() == 0)
-			return new JSONArray();
-		JSONObject statsNode = mr.getJSONObject(0);
-		return statsNode.getJSONObject("stat-list").getJSONArray("stat");
+		String url = "/suite-api/api/resources/" + resourceId;
+		JSONArray resList = this.getJson(url).getJSONArray("resourceList");
+		if(resList.length() == 0)
+			return null;
+		String name = resList.getJSONObject(0).getJSONObject("resourceKey").getString("name");
+		synchronized(nameCache) {
+			nameCache.put(resourceId, name);
+		}
+		return name;
 	}
 	
-	private JSONArray fetchJsonProps(JSONObject res) throws IOException, HttpException {
-		String id = res.getString("identifier");
+	public InputStream fetchMetricStream(List<JSONObject> resList, RowMetadata meta, long begin, long end) throws IOException, HttpException {
+		JSONObject q = new JSONObject();
+		JSONArray ids = new JSONArray();
+		for(JSONObject res : resList) 
+			ids.put(res.getString("identifier"));
+		q.put("resourceId", ids);
+		q.put("intervalType", "MINUTES");
+		q.put("intervalQuantifier", conf.getRollupMinutes());
+		q.put("rollUpType", "AVG");
+		q.put("begin", begin);
+		q.put("end", end);
+		JSONArray stats = new JSONArray();
+		for(String f : meta.getMetricMap().keySet())
+			stats.put(f);
+		q.put("statKey", stats);
+		return this.postJsonReturnStream("/suite-api/api/resources/stats/query", q);
+	}
+	
+	public Map<String, String> fetchProps(String id) throws IOException, HttpException {
 		String uri = "/suite-api/api/resources/" + id + "/properties";
 		JSONObject json = this.getJson(uri);
-		JSONArray result = json.getJSONArray("property");
+		JSONArray props = json.getJSONArray("property");
+		Map<String, String> result = new HashMap<>(props.length());
+		for(int i = 0; i < props.length(); ++i) {
+			JSONObject p = props.getJSONObject(i);
+			result.put(p.getString("name"), p.getString("value"));
+		}
 		return result;
 	}
 
-	private TreeMap<Long, List<Object>> fetchMetrics(JSONObject res, long begin, long end) throws IOException, HttpException {
-		TreeMap<Long, List<Object>> rows = new TreeMap<Long, List<Object>>();
-		String resId = res.getString("identifier");
-		String resName = res.getJSONObject("resourceKey").getString("name");
-		JSONArray myContent = this.fetchJsonMetrics(res, begin, end);
-		List<JSONArray> contentList = new ArrayList<>(2);
-		contentList.add(myContent);
-		List<JSONArray> propList = new ArrayList<>(2);
-		if(conf.hasProps())
-			propList.add(this.fetchJsonProps(res));
-		
-		// Are we fetching metrics from the parent?
-		//
-		if(parent != null) {
-			// Fetch metrics
-			//
-			JSONObject p = this.getParentOf(resId, parent.getResourceType());
-			
-			// Proceed only if parent was found
-			//
-			if(p != null) {
-				JSONArray parentContent = parent.fetchJsonMetrics(p, begin, end);
-				
-				// Splice with rest of metrics
-				//
-				// Put metric names back on the $parent:ResourceKind.metric form
-				//
-				for (int j = 0; j < parentContent.length(); ++j) {
-					JSONObject contentNode = parentContent.getJSONObject(j);
-					JSONObject statKey = contentNode.getJSONObject("statKey");
-					statKey.put("key", "$parent:" + parent.getResourceType() + "." + statKey.getString("key"));
-				}
-				contentList.add(parentContent);
-				
-				// Handle parent properties
-				//
-				if(parent.hasProps()) {
-					JSONArray parentProps = this.fetchJsonProps(p);
-					
-					// Put property names back on the $parent:ResourceKind.prop form
-					//
-					for (int j = 0; j < parentProps.length(); ++j) {
-						JSONObject pp = parentProps.getJSONObject(j);
-						pp.put("name", "$parent:" + parent.getResourceType() + "." + pp.getString("name"));
-					}
-					propList.add(parentProps);
-				}
-			}
-		}
-
-		// It's really just the fetching we're interested in running in
-		// parallel. The in-memory processing should
-		// be fast, so in order to keep the code simple, we hold a lock during
-		// the entire processing and writing phase.
-		//
-		synchronized (this) {
-			for(JSONArray chunk : contentList) {
-
-				// Handle each stat key
-				//
-				for (int j = 0; j < chunk.length(); ++j) {
-					JSONObject contentNode = chunk.getJSONObject(j);
-					String statKey = contentNode.getJSONObject("statKey").getString("key");
-					if (!this.statPos.containsKey(statKey))
-						continue;
-					int statIdx = this.statPos.get(statKey);
-	
-					// Handle timestamps
-					//
-					JSONArray jsonTs = contentNode.getJSONArray("timestamps");
-					List<Long> timestamps = new ArrayList<Long>();
-					for (int k = 0; k < jsonTs.length(); ++k) {
-						long t = jsonTs.getLong(k);
-						timestamps.add(t);
-					}
-	
-					// Handle values
-					//
-					JSONArray jsonValues = contentNode.getJSONArray("data");
-					for (int k = 0; k < jsonValues.length(); ++k) {
-						long t = timestamps.get(k);
-	
-						// Fill row with nulls up until where we're about to insert
-						// the data.
-						//
-						List<Object> row = rows.get(t);
-						if (row == null) {
-							row = new ArrayList<Object>();
-							row.add(t);
-							row.add(resName);
-							rows.put(t, row);
-						}
-						while (row.size() <= statIdx) {
-							row.add(null);
-						}
-						row.set(statIdx, jsonValues.get(k));
-					}
-				}
-			}
-			
-			// Handle properties
-			// TODO: Could be optimized by filling a sparse vector with the properties
-			// and copying it to each row.
-			//
-			for(JSONArray props : propList) {
-				for(List<Object> row : rows.values()) {
-					for(int i = 0; i < props.length(); ++i) {
-						JSONObject propBundle = props.getJSONObject(i);
-						String name = propBundle.getString("name");
-						if(!statPos.containsKey(name))
-							continue;
-						int idx = statPos.get(name);
-						while (row.size() <= idx) {
-							row.add(null);
-						}
-						row.set(idx, propBundle.get("value"));
-					}
-				}
-			}
-		}
-		return rows;
-	}
-	
-	private JSONObject getParentOf(String id, String parentType) throws JSONException, IOException, HttpException {
+	public JSONObject getParentOf(String id, String parentType) throws JSONException, IOException, HttpException {
 		JSONObject json = this.getJson("/suite-api/api/resources/" + id + "/relationships", "relationshipType=PARENT");
 		JSONArray rl = json.getJSONArray("resourceList");
 		for(int i = 0; i < rl.length(); ++i) {
@@ -366,31 +337,32 @@ public class Exporter {
 		}
 		return null;
 	}
+	
+	public void printResourceMetadata(String adapterAndResourceKind, PrintStream out) throws IOException, HttpException {
+		String resourceKind = adapterAndResourceKind;
+		String adapterKind = "VMWARE";
+		Matcher m = adapterAndResourceKindPattern.matcher(adapterAndResourceKind);
+		if(m.matches()) {
+			adapterKind = m.group(1);
+			resourceKind = m.group(2);
+		}
+		JSONObject response = this.getJson("/suite-api/api/adapterkinds/" + adapterKind + "/resourcekinds/" + resourceKind + "/statkeys");
+		JSONArray stats = response.getJSONArray("resourceTypeAttributes");
+		for(int i = 0; i < stats.length(); ++i) {
+			JSONObject stat = stats.getJSONObject(i);
+			out.println("Key  : " + stat.getString("key"));
+			out.println("Name : " + stat.getString("name"));
+			out.println();
+		}
+	}
 
-	private void handleResource(BufferedWriter bw, JSONObject res, long begin, long end) throws IOException, HttpException {
-		TreeMap<Long, List<Object>> rows = this.fetchMetrics(res, begin, end);
-		synchronized (this) {
-			// Done collecting data, now write it!
-			//
-			for (Map.Entry<Long, List<Object>> entry : rows.entrySet()) {
-				Iterator<Object> itor = entry.getValue().iterator();
-				
-				// Deal with timestamp
-				//
-				long t = (long) itor.next();
-				if(dateFormat != null) {
-					bw.write("\"" + dateFormat.format(new Date(t)) + "\"");
-				} else
-					bw.write("\"" + t + "\"");
-				while(itor.hasNext()) {
-					Object o = itor.next();
-					bw.write(",\"");
-					bw.write(o != null ? o.toString() : "");
-					bw.write('"');
-				}
-				bw.newLine();
-			}
-			bw.flush();
+	private void handleResources(BufferedWriter bw, List<JSONObject> resList, RowMetadata meta, long begin, long end, ProgressMonitor progress) throws IOException, HttpException, ExporterException {
+		InputStream content = this.fetchMetricStream(resList, meta, begin, end);
+		try {
+			StatsProcessor sp = new StatsProcessor(conf, this, rowsetCache);
+			sp.process(content, new CSVPrinter(bw, dateFormat, this, progress), begin, end);
+		} finally {
+			content.close();
 		}
 	}
 
@@ -419,19 +391,6 @@ public class Exporter {
             }
             ++pos;
         }
-        
-        // Handle parent fields
-        //
-        if(parentFields.size() > 0) {
-        	Config parentConfig = new Config();
-        	Config.Field[] pf = new Config.Field[parentFields.size()];
-        	parentFields.toArray(pf);
-        	parentConfig.setFields(pf);
-        	parentConfig.setResourceType(parentType);
-        	parentConfig.setRollupMinutes(this.conf.getRollupMinutes());
-        	parentConfig.setRollupType(this.conf.getRollupType());
-        	this.parent = new Exporter(urlBase, client, parentConfig);
-        }
     }
 
 	private JSONObject getJson(String uri, String ...queries) throws IOException, HttpException {
@@ -447,7 +406,7 @@ public class Exporter {
 			}
 		}
 		HttpGet get = new HttpGet(urlBase + uri);
-		get.addHeader("accept", "application/json");
+		get.addHeader("Accept", "application/json");
 		HttpResponse resp = client.execute(get);
 		this.checkResponse(resp);
 		JSONObject result = new JSONObject(EntityUtils.toString(resp.getEntity()));
@@ -455,6 +414,16 @@ public class Exporter {
 			jsonCache.put(uri, result);
 		}
 		return result;
+	}
+	
+	private InputStream postJsonReturnStream(String uri, JSONObject payload) throws IOException, HttpException {
+		HttpPost post = new HttpPost(urlBase + uri);
+		post.setEntity(new StringEntity(payload.toString()));
+		post.addHeader("Accept", "application/json");
+		post.addHeader("Content-Type", "application/json");
+		HttpResponse resp = client.execute(post);
+		this.checkResponse(resp);
+		return resp.getEntity().getContent();
 	}
 	
 	private JSONObject getJson(String uri, List<String> queries) throws IOException, HttpException {

@@ -113,6 +113,7 @@ fields:                                          # A list of fields
  # Host CPU type
   - alias: hostCPUType
     prop: $parent:HostSystem.cpu|cpuModel		# Reference to a metric in a parent
+```
     
 ## Known issues
 Very long time ranges in combination with small interval sizes can cause the server to prematurely close the connection, resulting in NoHttpResponseExceptions to be thrown.

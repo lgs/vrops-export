@@ -4,6 +4,9 @@ Simple utility for exporting data from vRealize Operations.
 ## Description
 A simple command-line data export tool for vRealize Operations. Currently supports CVS, but additional output formats are planned.
 
+# Installation
+The tool can be installed from pre-built binaries or built from source. If you're unclear what "building from source" means, you probably want to use the binaries. Building from source is mainly for people who like to change the code and contribute to the project.
+
 ## Installing the binaries
 ### Prerequisites
 * Java JDK 1.8 installed on the machine where you plan to run the tool
@@ -26,7 +29,7 @@ chmod +x exporttool.sh
 ./exporttool.sh -d samples/vmfields.yaml -u admin -p password -H https://my.vrops.host -i
 ```
 
-# Building from source
+## Building from source
 ### Prerequisites
 * Java JDK 1.8 installed on the machine where you plan to run the tool
 * vRealize Operations 6.3 or higher
@@ -69,8 +72,12 @@ usage: exporttool [-d <arg>] [-H <arg>] [-h] [-i] [-l <arg>] [-n <arg>]
  -q,--quiet               Quiet mode (no progress counter)
  -s,--start <arg>         Time period start (date format in definition file)
  -u,--username <arg>      Username
-
  ```
+ ### Notes:
+ * Start and end dates will use the date format specified in the definition file. Since dates tend to contain spaces and special characters, you probably want to put dates within double quotes (").
+ * If you're unsure of what the metric names are, use the -F option to print the metric names and keys for a specific resource type, e.g. -F VirtualMachine
+ * The -l (lookback) parameter is an alternative to the start and end dates. It sets the end date to the current time and goes back as far as you specify. You specify it as a number and a unit, e.g. 24h for 24 hours back. Valid unit are d=days, h=hours, m=minutes, s=seconds.
+ * The -P flag restricts the export to objects sharing a specified parent. Parents must be specified as resource kind and resource name, for example HostSystem:esxi-01 if you want to export only VMs on the host named "esxi-01".
  
  ## Definition file
  The details on what fields to export and how to treat them is expressed in the definition file. This file follows the YAML format. 
@@ -115,9 +122,12 @@ fields:                                          # A list of fields
     prop: $parent:HostSystem.cpu|cpuModel		# Reference to a metric in a parent
 ```
     
-## Known issues
-Very long time ranges in combination with small interval sizes can cause the server to prematurely close the connection, resulting in NoHttpResponseExceptions to be thrown.
- If this happens, consider shortening the time range.
+# Known issues
+* Very long time ranges in combination with small interval sizes can cause the server to prematurely close the connection, resulting in NoHttpResponseExceptions to be thrown. If this happens, consider shortening the time range.
+
+# Contributing to the code
+Contributing with code and new ideas is encouraged! If you have a great idea for a new or improved feature, please file a feature request under the "issues" tab in Github. 
+ 
 
 
 

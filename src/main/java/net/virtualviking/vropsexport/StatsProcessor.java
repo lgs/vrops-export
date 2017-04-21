@@ -29,18 +29,22 @@ public class StatsProcessor {
 	
 	private final LRUCache<String, Rowset> rowsetCache;
 	
-	public StatsProcessor(Config conf, DataProvider propertyProvider, LRUCache<String, Rowset> rowsetCache) {
+	private final boolean verbose;
+	
+	public StatsProcessor(Config conf, DataProvider propertyProvider, LRUCache<String, Rowset> rowsetCache, boolean verbose) {
 		this.conf = conf;
 		this.rowMetadata = new RowMetadata(conf);
 		this.dataProvider = propertyProvider;
 		this.rowsetCache = rowsetCache;
+		this.verbose = verbose;
 	}
 	
-	private StatsProcessor(Config conf, RowMetadata rowMetadata, DataProvider propertyProvider, LRUCache<String, Rowset> rowsetCache) {
+	private StatsProcessor(Config conf, RowMetadata rowMetadata, DataProvider propertyProvider, LRUCache<String, Rowset> rowsetCache, boolean verbose) {
 		this.conf = conf;
 		this.rowMetadata = rowMetadata;
 		this.dataProvider = propertyProvider;
 		this.rowsetCache = rowsetCache;
+		this.verbose = verbose;
 	}
 
 	public void process(InputStream is, RowsetProcessor proc, long begin, long end) throws ExporterException, JsonParseException, IOException, HttpException {
@@ -129,6 +133,7 @@ public class StatsProcessor {
 				//
 				RowMetadata pm = rowMetadata.forParent();
 				if(pm.isValid()) {
+					long now = System.currentTimeMillis();
 					JSONObject parent = dataProvider.getParentOf(resourceId, pm.getResourceType());
 					if(parent != null) {
 						Rowset cached = null;
@@ -142,7 +147,9 @@ public class StatsProcessor {
 						} else {
 							// Not in cache. Fetch it the hard (and slow) way!
 							//
-							StatsProcessor parentProcessor = new StatsProcessor(this.conf, pm, this.dataProvider, this.rowsetCache);
+							if(verbose)
+								System.err.println("Cache miss for parent " + parent.getJSONObject("resourceKey").getString("name"));
+							StatsProcessor parentProcessor = new StatsProcessor(this.conf, pm, this.dataProvider, this.rowsetCache, verbose);
 							InputStream pIs = this.dataProvider.fetchMetricStream(Collections.singletonList(parent), pm, begin, end);
 							try {
 								parentProcessor.process(pIs, new ParentSplicer(rs, this.rowsetCache), begin, end);
@@ -151,6 +158,8 @@ public class StatsProcessor {
 							}
 						}
 					}
+					if(verbose)
+						System.err.println("Parent processing took " + (System.currentTimeMillis() - now) + " ms");
 				}
 			}
 			proc.process(rs, rowMetadata);

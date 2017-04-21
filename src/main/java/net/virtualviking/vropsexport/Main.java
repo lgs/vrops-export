@@ -15,6 +15,7 @@ import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.logging.LogFactory;
 
 public class Main {
     public static void main(String[] args) throws Exception {
@@ -41,7 +42,7 @@ public class Main {
     	try {
     		// Extract command options and do sanity checks.
     		//
-    		
+    		int threads = 10;
     		String username = commandLine.getOptionValue('u');
     		if(username == null)
     			throw new ExporterException("Username must be specified");
@@ -53,12 +54,13 @@ public class Main {
     			throw new ExporterException("Host URL must be specified");
     		String output = commandLine.getOptionValue('o');
     		boolean trustCerts = commandLine.hasOption('i');
+    		boolean verbose = commandLine.hasOption('v');
     		
     		// If we're just printing field names, we have enough parameters at this point.
     		//
     		String resourceKind = commandLine.getOptionValue('F');
     		if(resourceKind != null) {
-    			Exporter exporter = new Exporter(host, username, password, trustCerts, null);
+    			Exporter exporter = new Exporter(host, username, password, trustCerts, threads, null, verbose);
     			exporter.printResourceMetadata(resourceKind, System.out);
     		} else {
     		
@@ -80,10 +82,21 @@ public class Main {
 	    		if(namePattern != null && parentSpec != null) 
 	    			throw new ExporterException("Name filter is not supported with parent is specified");
 	    		boolean quiet = commandLine.hasOption('q');
+	    		String tmp = commandLine.getOptionValue('t');
+	    		if(tmp != null) {
+		    		try {
+		    			threads = Integer.parseInt(tmp);
+		    			if(threads < 1 || threads > 20) {
+		    				throw new ExporterException("Number of threads must greater than 0 and smaller than 20");
+		    			}
+		    		} catch(NumberFormatException e) {
+		    			throw new ExporterException("Number of threads must be a valid integer");
+		    		}
+	    		}
 	    		
-	    		// Output to stdout implies quiet mode
+	    		// Output to stdout implies quiet mode. Also, verbose would mess up the progress counter, so turn it off.
 	    		//
-	    		if(output == null)
+	    		if(output == null || verbose)
 	    			quiet = true;
 	    		
 	    		// Read definition and run it!
@@ -108,7 +121,7 @@ public class Main {
 		        			throw new ExporterException(e.getMessage());
 		        		}
 		        	}
-			        Exporter exporter = new Exporter(host, username, password, trustCerts, conf);
+			        Exporter exporter = new Exporter(host, username, password, trustCerts, threads, conf, verbose);
 			        Writer wrt = output != null ? new FileWriter(output) : new OutputStreamWriter(System.out);
 			        exporter.exportTo(wrt, begin, end, namePattern, parentSpec, quiet);
 		    	} finally {
@@ -127,6 +140,7 @@ public class Main {
     
     private static Options defineOptions() {
 		Options opts = new Options();
+		opts.addOption("v", "verbose", false, "Print debug and timing information");
 		opts.addOption("d", "definition", true, "Path to definition file");
 		opts.addOption("l", "lookback", true, "Lookback time");
 		opts.addOption("s", "start", true, "Time period start (date format in definition file)");
@@ -140,6 +154,7 @@ public class Main {
 		opts.addOption("q", "quiet", false, "Quiet mode (no progress counter)");
 		opts.addOption("i", "ignore-cert", false, "Trust any cert");
 		opts.addOption("F", "list-fields", true, "Print name and keys of all fields to stdout");
+		opts.addOption("t", "threads", true, "Number of parallel processing threads (default=10)");
 		opts.addOption("h", "help", false, "Print a short help");
 		return opts;
 	}		

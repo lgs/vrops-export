@@ -5,6 +5,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.http.HttpException;
 import org.apache.http.HttpResponse;
+import org.apache.http.NoHttpResponseException;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
@@ -104,10 +105,13 @@ public class Exporter implements DataProvider {
 	
 	private static final int SOCKET_TIMEOUT_MS = 60000;
 	
-	private final ThreadPoolExecutor executor = new ThreadPoolExecutor(5, 5, 5, TimeUnit.SECONDS,
-			new ArrayBlockingQueue<>(20), new ThreadPoolExecutor.CallerRunsPolicy());
+	private String authToken;
+	
+	private final boolean verbose;
+	
+	private ThreadPoolExecutor executor;
 
-	public Exporter(String urlBase, String username, String password, boolean unsafeSsl, Config conf)
+	public Exporter(String urlBase, String username, String password, boolean unsafeSsl, int threads, Config conf, boolean verbose)
 			throws IOException, HttpException, KeyStoreException, NoSuchAlgorithmException, KeyManagementException, ExporterException {
 		CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
 		credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
@@ -131,29 +135,47 @@ public class Exporter implements DataProvider {
 			SSLConnectionSocketFactory sslf = new SSLConnectionSocketFactory(sslContext, NoopHostnameVerifier.INSTANCE);
 			Registry<ConnectionSocketFactory> socketFactoryRegistry = RegistryBuilder.<ConnectionSocketFactory> create().register("https", sslf).build();
 			PoolingHttpClientConnectionManager cm = new PoolingHttpClientConnectionManager(socketFactoryRegistry);
-			cm.setMaxTotal(200);
+			cm.setMaxTotal(20);
 			cm.setDefaultMaxPerRoute(20);
 			this.client = HttpClients.custom().
 					setSSLSocketFactory(sslf).
-					setDefaultCredentialsProvider(credentialsProvider).
+					//setDefaultCredentialsProvider(credentialsProvider).
 					setConnectionManager(cm).
 				    setDefaultRequestConfig(requestConfig).
-					setRetryHandler(new DefaultHttpRequestRetryHandler(3, false)).
+					//setRetryHandler(new DefaultHttpRequestRetryHandler(3, false)).
 					setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE).build();
 		} else {
 			PoolingHttpClientConnectionManager cm = new PoolingHttpClientConnectionManager();
-			cm.setMaxTotal(200);
+			cm.setMaxTotal(20);
 			cm.setDefaultMaxPerRoute(20);
 			this.client = HttpClientBuilder.create().
 					setConnectionManager(cm).
 					setDefaultRequestConfig(requestConfig).
-					setRetryHandler(new DefaultHttpRequestRetryHandler(3, false)).
-					setDefaultCredentialsProvider(credentialsProvider).build();
+					//setRetryHandler(new DefaultHttpRequestRetryHandler(3, false)).
+				//	setDefaultCredentialsProvider(credentialsProvider).
+					build();
 		}
-		this.init(urlBase, client, conf);
+		this.verbose = verbose;
+		
+		// Do basic initialization
+		//
+		this.init(urlBase, client, conf, threads);
+
+		// Authenticate
+		//
+		JSONObject rq = new JSONObject();
+		rq.put("username", username);
+		rq.put("password", password);
+		InputStream is = this.postJsonReturnStream("/suite-api/api/auth/token/acquire", rq);
+		try {
+			JSONObject response = new JSONObject(IOUtils.toString(is, Charset.defaultCharset()));
+			this.authToken = response.getString("token");
+		} finally {
+			is.close();
+		}
 	}
 
-	private void init(String urlBase, HttpClient client, Config conf) throws IOException, HttpException, ExporterException {
+	private void init(String urlBase, HttpClient client, Config conf, int threads) throws IOException, HttpException, ExporterException {
 		this.client = client;
 		this.urlBase = urlBase;
 		this.conf = conf;
@@ -166,6 +188,8 @@ public class Exporter implements DataProvider {
 				this.dateFormat = new SimpleDateFormat(this.conf.getDateFormat());
 			this.registerFields();
 		}
+		this.executor = new ThreadPoolExecutor(threads, threads, 5, TimeUnit.SECONDS,
+					new ArrayBlockingQueue<>(20), new ThreadPoolExecutor.CallerRunsPolicy());
 	}
 	
 	public String getResourceType() {
@@ -272,9 +296,13 @@ public class Exporter implements DataProvider {
 		String url = "/suite-api/api/resources";
 		ArrayList<String> qs = new ArrayList<>();
 		qs.add("resourceKind=" + resourceKind);
+		qs.add("pageSize=100000");
 		if(name != null)
 			qs.add("name=" + name);
-		return this.getJson(url, qs).getJSONArray("resourceList");
+		JSONObject response = this.getJson(url, qs);
+		if(verbose)
+			System.err.println("Resources found: " + response.getJSONObject("pageInfo").getInt("totalCount"));
+		return response.getJSONArray("resourceList");
 	}
 	
 	public String getResourceName(String resourceId) throws JSONException, IOException, HttpException {
@@ -357,10 +385,43 @@ public class Exporter implements DataProvider {
 	}
 
 	private void handleResources(BufferedWriter bw, List<JSONObject> resList, RowMetadata meta, long begin, long end, ProgressMonitor progress) throws IOException, HttpException, ExporterException {
-		InputStream content = this.fetchMetricStream(resList, meta, begin, end);
+		InputStream content = null;
 		try {
-			StatsProcessor sp = new StatsProcessor(conf, this, rowsetCache);
+			long start = System.currentTimeMillis();
+			content = this.fetchMetricStream(resList, meta, begin, end);
+			if(verbose)
+				System.err.println("Metric request call took " + (System.currentTimeMillis() - start) + " ms");
+		} catch(NoHttpResponseException e) {
+			// This seems to happen when we're giving the server too much work to do in one call.
+			// Try again, but split the chunk into two and run them separately.
+			//
+			int sz = resList.size();
+			if(sz <= 1) {
+				// Already down to one item? We're out of luck!
+				//
+				throw new ExporterException(e);
+			}
+			// Split lists and try them separately
+			//
+			int half = sz / 2;
+			log.warn("Server closed connection. Trying smaller chunk (current=" + sz + ")");
+			List<JSONObject> left = new ArrayList<>(half);
+			List<JSONObject> right = new ArrayList<>(sz - half);
+			int i = 0;
+			while(i < half) 
+				left.add(resList.get(i++));
+			while(i < sz)
+				right.add(resList.get(i++));
+			this.handleResources(bw, left, meta, begin, end, progress);
+			this.handleResources(bw, left, meta, begin, end, progress);
+			return;
+		}
+		try {
+			long start = System.currentTimeMillis();
+			StatsProcessor sp = new StatsProcessor(conf, this, rowsetCache, verbose);
 			sp.process(content, new CSVPrinter(bw, dateFormat, this, progress), begin, end);
+			if(verbose)
+				System.err.println("Result processing " + (System.currentTimeMillis() - start) + " ms");
 		} finally {
 			content.close();
 		}
@@ -407,6 +468,8 @@ public class Exporter implements DataProvider {
 		}
 		HttpGet get = new HttpGet(urlBase + uri);
 		get.addHeader("Accept", "application/json");
+		if(this.authToken != null)
+			get.addHeader("Authorization", "vRealizeOpsToken " + this.authToken + "");
 		HttpResponse resp = client.execute(get);
 		this.checkResponse(resp);
 		JSONObject result = new JSONObject(EntityUtils.toString(resp.getEntity()));
@@ -419,8 +482,11 @@ public class Exporter implements DataProvider {
 	private InputStream postJsonReturnStream(String uri, JSONObject payload) throws IOException, HttpException {
 		HttpPost post = new HttpPost(urlBase + uri);
 		post.setEntity(new StringEntity(payload.toString()));
+		//System.err.println(payload.toString());
 		post.addHeader("Accept", "application/json");
 		post.addHeader("Content-Type", "application/json");
+		if(this.authToken != null)
+			post.addHeader("Authorization", "vRealizeOpsToken " + this.authToken + "");
 		HttpResponse resp = client.execute(post);
 		this.checkResponse(resp);
 		return resp.getEntity().getContent();

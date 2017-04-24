@@ -36,6 +36,8 @@ import net.virtualviking.vropsexport.processors.CSVPrinter;
 import javax.net.ssl.SSLContext;
 
 import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
@@ -109,13 +111,13 @@ public class Exporter implements DataProvider {
 	
 	private final boolean verbose;
 	
+	private final boolean useTempFile;
+	
 	private ThreadPoolExecutor executor;
 
-	public Exporter(String urlBase, String username, String password, boolean unsafeSsl, int threads, Config conf, boolean verbose)
+	public Exporter(String urlBase, String username, String password, boolean unsafeSsl, int threads, Config conf, boolean verbose, boolean useTempFile)
 			throws IOException, HttpException, KeyStoreException, NoSuchAlgorithmException, KeyManagementException, ExporterException {
-		CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-		credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
-		
+	
 		// Configure timeout
 		//
 		final RequestConfig requestConfig = RequestConfig.custom()
@@ -139,23 +141,22 @@ public class Exporter implements DataProvider {
 			cm.setDefaultMaxPerRoute(20);
 			this.client = HttpClients.custom().
 					setSSLSocketFactory(sslf).
-					//setDefaultCredentialsProvider(credentialsProvider).
 					setConnectionManager(cm).
 				    setDefaultRequestConfig(requestConfig).
 					//setRetryHandler(new DefaultHttpRequestRetryHandler(3, false)).
 					setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE).build();
 		} else {
 			PoolingHttpClientConnectionManager cm = new PoolingHttpClientConnectionManager();
-			cm.setMaxTotal(20);
-			cm.setDefaultMaxPerRoute(20);
+			cm.setMaxTotal(threads * 4);
+			cm.setDefaultMaxPerRoute(threads * 4);
 			this.client = HttpClientBuilder.create().
 					setConnectionManager(cm).
 					setDefaultRequestConfig(requestConfig).
 					//setRetryHandler(new DefaultHttpRequestRetryHandler(3, false)).
-				//	setDefaultCredentialsProvider(credentialsProvider).
 					build();
 		}
 		this.verbose = verbose;
+		this.useTempFile = useTempFile;
 		
 		// Do basic initialization
 		//
@@ -417,11 +418,32 @@ public class Exporter implements DataProvider {
 			return;
 		}
 		try {
+			if(useTempFile) {
+				// Dump to temp file
+				//
+				File tmpFile = null;
+				long start = System.currentTimeMillis();
+				try {
+					tmpFile = File.createTempFile("vrops-export", ".tmp");
+					FileOutputStream out = new FileOutputStream(tmpFile);
+					try {
+						IOUtils.copy(content, out);
+					} finally {
+						out.close();
+					}
+					
+				} finally {
+					content.close();
+				}
+				content = new SelfDeletingFileInputStream(tmpFile);
+				if(verbose)
+					System.err.println("Dumping to temp file took " + (System.currentTimeMillis() - start) + " ms");
+			}
 			long start = System.currentTimeMillis();
 			StatsProcessor sp = new StatsProcessor(conf, this, rowsetCache, verbose);
 			sp.process(content, new CSVPrinter(bw, dateFormat, this, progress), begin, end);
 			if(verbose)
-				System.err.println("Result processing " + (System.currentTimeMillis() - start) + " ms");
+				System.err.println("Result processing took " + (System.currentTimeMillis() - start) + " ms");
 		} finally {
 			content.close();
 		}

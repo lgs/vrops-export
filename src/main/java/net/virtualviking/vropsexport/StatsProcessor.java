@@ -162,6 +162,8 @@ public class StatsProcessor {
 						System.err.println("Parent processing took " + (System.currentTimeMillis() - now) + " ms");
 				}
 			}
+			if(verbose)
+				System.err.println("Processed " + rs.getRows().size() + " rows");
 			proc.process(rs, rowMetadata);
 		}
 		this.expect(p, JsonToken.END_OBJECT);

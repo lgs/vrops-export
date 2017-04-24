@@ -55,12 +55,13 @@ public class Main {
     		String output = commandLine.getOptionValue('o');
     		boolean trustCerts = commandLine.hasOption('i');
     		boolean verbose = commandLine.hasOption('v');
+    		boolean useTmpFile = !commandLine.hasOption('S');
     		
     		// If we're just printing field names, we have enough parameters at this point.
     		//
     		String resourceKind = commandLine.getOptionValue('F');
     		if(resourceKind != null) {
-    			Exporter exporter = new Exporter(host, username, password, trustCerts, threads, null, verbose);
+    			Exporter exporter = new Exporter(host, username, password, trustCerts, threads, null, verbose, useTmpFile);
     			exporter.printResourceMetadata(resourceKind, System.out);
     		} else {
     		
@@ -121,7 +122,7 @@ public class Main {
 		        			throw new ExporterException(e.getMessage());
 		        		}
 		        	}
-			        Exporter exporter = new Exporter(host, username, password, trustCerts, threads, conf, verbose);
+			        Exporter exporter = new Exporter(host, username, password, trustCerts, threads, conf, verbose, useTmpFile);
 			        Writer wrt = output != null ? new FileWriter(output) : new OutputStreamWriter(System.out);
 			        exporter.exportTo(wrt, begin, end, namePattern, parentSpec, quiet);
 		    	} finally {
@@ -155,6 +156,7 @@ public class Main {
 		opts.addOption("i", "ignore-cert", false, "Trust any cert");
 		opts.addOption("F", "list-fields", true, "Print name and keys of all fields to stdout");
 		opts.addOption("t", "threads", true, "Number of parallel processing threads (default=10)");
+		opts.addOption("S", "streaming", false, "True streaming processing. Faster but less reliable");
 		opts.addOption("h", "help", false, "Print a short help");
 		return opts;
 	}		

@@ -107,6 +107,8 @@ public class Exporter implements DataProvider {
 	
 	private static final int SOCKET_TIMEOUT_MS = 60000;
 	
+	private static final int PAGE_SIZE = 1000;
+	
 	private String authToken;
 	
 	private final boolean verbose;
@@ -216,54 +218,65 @@ public class Exporter implements DataProvider {
 
 		RowMetadata meta = new RowMetadata(conf);
 		JSONArray resources;
+		String parentId = null;
 		if(parentSpec != null) {
 			// Lookup parent
 			//
 			Matcher m = parentSpecPattern.matcher(parentSpec);
 			if(!m.matches())
 				throw new ExporterException("Not a valid parent spec: " + parentSpec + ". should be on the form ResourceKind:resourceName");
-			JSONArray pResources = this.fetchResources(m.group(1), m.group(2));
+			JSONArray pResources = this.fetchResources(m.group(1), m.group(2), 1).getJSONArray("resourceList");
 			if(pResources.length() == 0) 
 				throw new ExporterException("Parent not found");
 			if(pResources.length() > 1)
 				throw new ExporterException("Parent spec is not unique");
-			String pId = pResources.getJSONObject(0).getString("identifier");
-			
-			// Get children
-			//
-			String url = "/suite-api/api/resources/" + pId + "/relationships";
-			resources = this.getJson(url, "relationshipType=CHILD").getJSONArray("resourceList");
-		} else {
-			// Get all objects, possibly filtered by name
-			//
-			resources = this.fetchResources(conf.getResourceType(), namePattern);
+			parentId = pResources.getJSONObject(0).getString("identifier");
 		} 
-		// Initialize progress reporting
-		//
-		if(!quiet) {
-			progress = new Progress(resources.length());
-			progress.reportProgress(0);
-		}
-		// Canculate a suitable chunk size by assuming that responses should be kept shorter than MAX_RESPONSE_ROWS.
-		//
-		long estimatedRows = conf.getFields().length * (end - begin) / (conf.getRollupMinutes() * 60000);
-		int chunkSize = (int) Math.min(Math.max(MAX_RESPONSE_ROWS / estimatedRows, 1), MAX_CHUNKSIZE);
-		ArrayList<JSONObject> chunk = new ArrayList<>(chunkSize);
-		for (int i = 0; i < resources.length(); ++i) {
-			JSONObject res = resources.getJSONObject(i);
-			synchronized(nameCache) {
-				nameCache.put(res.getString("identifier"), res.getJSONObject("resourceKey").getString("name"));
+		int page = 0;
+		for(;;) {
+			JSONObject resObj = null;
+			
+			// Fetch resources
+			//
+			if(parentId != null) {
+				String url = "/suite-api/api/resources/" + parentId + "/relationships";
+				resObj = this.getJson(url, "relationshipType=CHILD", "page=" + page++);
+			} else
+				resObj = this.fetchResources(conf.getResourceType(), namePattern, page++);
+			resources = resObj.getJSONArray("resourceList");
+			
+			// If we got an empty set back, we ran out of pages.
+			//
+			if(resources.length() == 0)
+				break;
+			
+			// Initialize progress reporting
+			//
+			if(!quiet && progress == null) {
+				progress = new Progress(resObj.getJSONObject("pageInfo").getInt("totalCount"));
+				progress.reportProgress(0);
 			}
-			chunk.add(res);
-			if(chunk.size() >= chunkSize || i == resources.length() - 1) { 
-				
-				// Child relationships may return objects of the wrong type, so we have
-				// to check the type here.
-				//
-				if(!res.getJSONObject("resourceKey").getString("resourceKindKey").equals(conf.getResourceType()))
-					continue;
-				this.startChunkJob(bw, chunk, meta, begin, end, progress);
-				chunk = new ArrayList<>(chunkSize);
+			// Canculate a suitable chunk size by assuming that responses should be kept shorter than MAX_RESPONSE_ROWS.
+			//
+			long estimatedRows = conf.getFields().length * (end - begin) / (conf.getRollupMinutes() * 60000);
+			int chunkSize = (int) Math.min(Math.max(MAX_RESPONSE_ROWS / estimatedRows, 1), MAX_CHUNKSIZE);
+			ArrayList<JSONObject> chunk = new ArrayList<>(chunkSize);
+			for (int i = 0; i < resources.length(); ++i) {
+				JSONObject res = resources.getJSONObject(i);
+				synchronized(nameCache) {
+					nameCache.put(res.getString("identifier"), res.getJSONObject("resourceKey").getString("name"));
+				}
+				chunk.add(res);
+				if(chunk.size() >= chunkSize || i == resources.length() - 1) { 
+					
+					// Child relationships may return objects of the wrong type, so we have
+					// to check the type here.
+					//
+					if(!res.getJSONObject("resourceKey").getString("resourceKindKey").equals(conf.getResourceType()))
+						continue;
+					this.startChunkJob(bw, chunk, meta, begin, end, progress);
+					chunk = new ArrayList<>(chunkSize);
+				}
 			}
 		}
 		executor.shutdown();
@@ -293,17 +306,18 @@ public class Exporter implements DataProvider {
 		});
 	}
 	
-	private JSONArray fetchResources(String resourceKind, String name) throws JSONException, IOException, HttpException {
+	private JSONObject fetchResources(String resourceKind, String name, int page) throws JSONException, IOException, HttpException {
 		String url = "/suite-api/api/resources";
 		ArrayList<String> qs = new ArrayList<>();
 		qs.add("resourceKind=" + resourceKind);
-		qs.add("pageSize=100000");
+		qs.add("pageSize=" + PAGE_SIZE);
+		qs.add("page=" + page);
 		if(name != null)
 			qs.add("name=" + name);
-		JSONObject response = this.getJson(url, qs);
+		JSONObject response = this.getJson(url, qs); 
 		if(verbose)
 			System.err.println("Resources found: " + response.getJSONObject("pageInfo").getInt("totalCount"));
-		return response.getJSONArray("resourceList");
+		return response;
 	}
 	
 	public String getResourceName(String resourceId) throws JSONException, IOException, HttpException {

@@ -1,3 +1,18 @@
+/* 
+ * Copyright 2017 Pontus Rydin
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
 package net.virtualviking.vropsexport;
 
 import java.io.FileReader;
@@ -35,7 +50,7 @@ public class Main {
     	if(commandLine.hasOption('h')) {
     		HelpFormatter hf = new HelpFormatter();
     		String head = "Exports vRealize Operations Metrics";
-    		String foot = "Project home: https://github.com/prydin/vrops-export";
+    		String foot = "\nProject home: https://github.com/prydin/vrops-export";
     		hf.printHelp("exporttool", head, opts, foot, true);
     		System.exit(0);
     	}
@@ -63,8 +78,11 @@ public class Main {
     		if(resourceKind != null) {
     			Exporter exporter = new Exporter(host, username, password, trustCerts, threads, null, verbose, useTmpFile);
     			exporter.printResourceMetadata(resourceKind, System.out);
-    		} else {
-    		
+    		} else if(commandLine.hasOption('R')) {
+    			String adapterKind = commandLine.getOptionValue('R');
+    			Exporter exporter = new Exporter(host, username, password, trustCerts, threads, null, verbose, useTmpFile);
+    			exporter.printResourceKinds(adapterKind, System.out);
+    		} else {	
 	    		String defFile = commandLine.getOptionValue('d');
 	    		if(defFile == null) 
 	    			throw new ExporterException("Definition file must be specified");
@@ -157,7 +175,8 @@ public class Main {
 		opts.addOption("F", "list-fields", true, "Print name and keys of all fields to stdout");
 		opts.addOption("t", "threads", true, "Number of parallel processing threads (default=10)");
 		opts.addOption("S", "streaming", false, "True streaming processing. Faster but less reliable");
-		opts.addOption("h", "help", false, "Print a short help");
+		opts.addOption("R", "resource-kinds", true, "List resource kinds");
+		opts.addOption("h", "help", false, "Print a short help text");
 		return opts;
 	}		
     

@@ -1,3 +1,18 @@
+/* 
+ * Copyright 2017 Pontus Rydin
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
 package net.virtualviking.vropsexport;
 
 import org.apache.commons.io.IOUtils;
@@ -225,7 +240,7 @@ public class Exporter implements DataProvider {
 			Matcher m = parentSpecPattern.matcher(parentSpec);
 			if(!m.matches())
 				throw new ExporterException("Not a valid parent spec: " + parentSpec + ". should be on the form ResourceKind:resourceName");
-			JSONArray pResources = this.fetchResources(m.group(1), m.group(2), 1).getJSONArray("resourceList");
+			JSONArray pResources = this.fetchResources(m.group(1), m.group(2), 0).getJSONArray("resourceList");
 			if(pResources.length() == 0) 
 				throw new ExporterException("Parent not found");
 			if(pResources.length() > 1)
@@ -395,6 +410,19 @@ public class Exporter implements DataProvider {
 			JSONObject stat = stats.getJSONObject(i);
 			out.println("Key  : " + stat.getString("key"));
 			out.println("Name : " + stat.getString("name"));
+			out.println();
+		}
+	}
+	
+	public void printResourceKinds(String adapterKind, PrintStream out) throws IOException, HttpException {
+		if(adapterKind == null) 
+			adapterKind = "VMWARE";
+		JSONObject response = this.getJson("/suite-api/api/adapterkinds/" + adapterKind + "/resourcekinds");
+		JSONArray kinds = response.getJSONArray("resource-kind");
+		for(int i = 0; i < kinds.length(); ++i) {
+			JSONObject kind = kinds.getJSONObject(i);
+			out.println("Key  : " + kind.getString("key"));
+			out.println("Name : " + kind.getString("name"));
 			out.println();
 		}
 	}

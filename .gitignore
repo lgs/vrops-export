@@ -3,6 +3,8 @@
 /.DS_Store
 /.classpath
 /.project
+/.idea
+/.setting
 /vrops.csv
 /dependency-reduced-pom.xml
 /nohup.out

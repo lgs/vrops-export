@@ -456,7 +456,7 @@ public class Exporter implements DataProvider {
 			while(i < sz)
 				right.add(resList.get(i++));
 			this.handleResources(bw, left, meta, begin, end, progress);
-			this.handleResources(bw, left, meta, begin, end, progress);
+			this.handleResources(bw, right, meta, begin, end, progress);
 			return;
 		}
 		try {

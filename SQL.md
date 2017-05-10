@@ -4,6 +4,9 @@ As of version 2.0, there is an option to export the data to a SQL database rathe
 ## Configuration file settings
 These are the  new configuration file settings:
 * outputFormat - Must be set to "sql" for SQL export.
+* connectionString - A JDBC connection string. The format depends on the database vendor.
+* username - An optional database username.
+* password - An optional database password.
 * databaseType - Type of database. Currently supports postgres, mysql, mssql and oracle. Additional databases can be supported by using the driver option. Note that "driver" and "databaseType" are mutually exclusive.
 * driver - The class name of the JDBC driver. Use this setting, along with the JDBC_JAR environment variable to export to a database type that's not included in the choices for "databaseType".
 * sql - The SQL statement to use for inserting data into the database. See below for a full description.

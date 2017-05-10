@@ -23,27 +23,38 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class RowMetadata {
-	private final String resourceType;
+	private final String resourceKind;
+	
+	private final String adapterKind;
 	
 	private final Map<String, Integer> metricMap = new HashMap<>();
 	
 	private final Map<String, Integer> propMap = new HashMap<>();
+	
+	private final Map<String, Integer> metricAliasMap = new HashMap<>();
+	
+	private final Map<String, Integer> propAliasMap = new HashMap<>();
 	
 	private int[] propInsertionPoints;
 	
 	private Pattern parentPattern = Pattern.compile("^\\$parent\\:([_A-Za-z][_A-Za-z0-9]*)\\.(.+)$");
 	
 	public RowMetadata(Config conf) {
-		this.resourceType = conf.getResourceType();
+		this.resourceKind = conf.getResourceKind();
+		this.adapterKind = conf.getAdapterKind();
 		int mp = 0;
 		int pp = 0;
 		List<Integer> pip = new ArrayList<>(); 
 		for(Config.Field fld : conf.getFields()) {
-			if(fld.hasMetric()) 
-				metricMap.put(fld.getMetric(), mp++);
-			if(fld.hasProp()) {
-				propMap.put(fld.getProp(), pp++);
-				pip.add(mp);
+			if(fld.hasMetric()) {
+				metricMap.put(fld.getMetric(), mp);
+				metricAliasMap.put(fld.getAlias(), mp++);
+			} else {
+				if(fld.hasProp()) {
+					propMap.put(fld.getProp(), pp);
+					propAliasMap.put(fld.getAlias(), pp++);
+					pip.add(mp);
+				}
 			}
 		}
 		propInsertionPoints = new int[pip.size()];
@@ -82,7 +93,8 @@ public class RowMetadata {
 				metricMap.put("_placholder_" + mt, e.getValue());
 			}
 		}
-		this.resourceType = t;
+		this.resourceKind = t;
+		this.adapterKind = null; // TODO: It should be possible to specify adapter type as well!
 	}
 	
 	public RowMetadata forParent() throws ExporterException {
@@ -109,15 +121,31 @@ public class RowMetadata {
 		return propMap.containsKey(property) ? propMap.get(property) : -1;
 	}
 	
+	public int getMetricIndexByAlias(String metric) {
+		return metricAliasMap.containsKey(metric) ? metricAliasMap.get(metric) : -1;
+	}
+	
+	public int getPropertyIndexByAlias(String property) {
+		return propAliasMap.containsKey(property) ? propAliasMap.get(property) : -1;
+	}
+	
 	public Row newRow(long timestamp) {
 		return new Row(timestamp, metricMap.size(), propMap.size());
 	}
 	
-	public String getResourceType() {
-		return resourceType;
+	public String getResourceKind() {
+		return resourceKind;
+	}
+
+	public String getAdapterKind() {
+		return adapterKind;
+	}
+
+	public boolean hasProperties() {
+		return propMap.size() > 0;
 	}
 	
 	public boolean isValid() {
-		return resourceType != null;
+		return resourceKind != null;
 	}
 }

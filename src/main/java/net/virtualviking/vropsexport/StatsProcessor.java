@@ -134,12 +134,21 @@ public class StatsProcessor {
 			// Splice in properties
 			//
 			if(dataProvider != null) {
-				Map<String, String> props = dataProvider.fetchProps(resourceId);
-				for(Map.Entry<String, String> e : props.entrySet()) {
-					int idx = rowMetadata.getPropertyIndex(e.getKey());
-					if(idx != -1) {
-						for(Row row : rs.getRows().values()) {
-							row.setProp(idx, e.getValue());
+				if(rowMetadata.hasProperties()) {
+					// Put in resource id if requested.
+					//
+					int idIdx = rowMetadata.getPropertyIndex("$resId");
+					if(idIdx != -1) {
+						for(Row row : rs.getRows().values()) 
+							row.setProp(idIdx, resourceId);
+					}
+					Map<String, String> props = dataProvider.fetchProps(resourceId);
+					for(Map.Entry<String, String> e : props.entrySet()) {
+						int idx = rowMetadata.getPropertyIndex(e.getKey());
+						if(idx != -1) {
+							for(Row row : rs.getRows().values()) {
+								row.setProp(idx, e.getValue());
+							}
 						}
 					}
 				}
@@ -149,7 +158,7 @@ public class StatsProcessor {
 				RowMetadata pm = rowMetadata.forParent();
 				if(pm.isValid()) {
 					long now = System.currentTimeMillis();
-					JSONObject parent = dataProvider.getParentOf(resourceId, pm.getResourceType());
+					JSONObject parent = dataProvider.getParentOf(resourceId, pm.getResourceKind());
 					if(parent != null) {
 						Rowset cached = null;
 						synchronized(this.rowsetCache) {

@@ -113,16 +113,18 @@ public class Main {
 		    		}
 	    		}
 	    		
-	    		// Output to stdout implies quiet mode. Also, verbose would mess up the progress counter, so turn it off.
-	    		//
-	    		if(output == null || verbose)
-	    			quiet = true;
-	    		
 	    		// Read definition and run it!
 	    		//
 		    	FileReader fr = new FileReader(defFile);
 		    	try {
 			    	Config conf = ConfigLoader.parse(fr);
+			    	
+					// Output to stdout implies quiet mode. Also, verbose would mess up the progress counter, so turn it off.
+			    	// If we're outputting to a textual format that can dump to stdout, we supress the progress counter, but
+			    	// if we're dumping to e.g. SQL, we keep it on. This is a bit kludgy.. TODO: Revisit
+		    		//
+		    		if(output == null && "csv".equals(conf.getOutputFormat()) || verbose)
+		    			quiet = true;
 			    	
 			    	// Deal with start and end dates
 			    	//

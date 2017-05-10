@@ -88,7 +88,7 @@ public class Row {
 		public Object next() {
 			if(!this.hasNext()) 
 				throw new NoSuchElementException();
-			if(meta.getPropInsertionPoints()[pc] == mc)
+			if(pc < props.length && meta.getPropInsertionPoints()[pc] == mc)
 				return getProp(pc++);
 			return getMetric(mc++);
 		}

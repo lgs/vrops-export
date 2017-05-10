@@ -15,6 +15,8 @@
 */
 package net.virtualviking.vropsexport;
 
+import java.util.regex.Matcher;
+
 public class Config {
 	public static class Field {
 		private String alias;
@@ -70,6 +72,10 @@ public class Config {
 	private String rollupType;
 	private long rollupMinutes;
 	private String dateFormat;
+	private String outputFormat;
+	private SQLConfig sqlConfig;
+	private String resourceKind;
+	private String adapterKind;
 	
 	public Config() {
 	}
@@ -82,12 +88,17 @@ public class Config {
 		this.fields = fields;
 	}
 
-	public String getResourceType() {
+	private String getResourceType() {
 		return resourceType;
 	}
 
 	public void setResourceType(String resourceType) {
-		this.resourceType = resourceType;
+		Matcher m = Patterns.adapterAndResourceKindPattern.matcher(resourceType);
+		if(m.matches()) {
+			this.adapterKind = m.group(1);
+			this.resourceKind = m.group(2);
+		} else
+			this.resourceKind = resourceType;
 	}
 
 	public String getRollupType() {
@@ -114,6 +125,22 @@ public class Config {
 		this.dateFormat = dateFormat;
 	}
 
+	public String getOutputFormat() {
+		return outputFormat;
+	}
+
+	public void setOutputFormat(String outputFormat) {
+		this.outputFormat = outputFormat;
+	}
+
+	public SQLConfig getSqlConfig() {
+		return sqlConfig;
+	}
+
+	public void setSqlConfig(SQLConfig sqlConfig) {
+		this.sqlConfig = sqlConfig;
+	}
+
 	public boolean hasProps() {
 		for(Field f : fields) {
 			if(f.hasProp())
@@ -122,6 +149,22 @@ public class Config {
 		return false;
 	}
 	
+	public String getResourceKind() {
+		return resourceKind;
+	}
+
+	public void setResourceKind(String resourceKind) {
+		this.resourceKind = resourceKind;
+	}
+
+	public String getAdapterKind() {
+		return adapterKind;
+	}
+
+	public void setAdapterKind(String adapterKind) {
+		this.adapterKind = adapterKind;
+	}
+
 	public boolean hasMetrics() {
 		for(Field f : fields) {
 			if(f.hasMetric())

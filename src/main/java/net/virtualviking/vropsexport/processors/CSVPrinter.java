@@ -15,12 +15,14 @@
 */
 package net.virtualviking.vropsexport.processors;
 
+import net.virtualviking.vropsexport.Config;
 import net.virtualviking.vropsexport.DataProvider;
 import net.virtualviking.vropsexport.ExporterException;
 import net.virtualviking.vropsexport.ProgressMonitor;
 
 import java.io.IOException;
 import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 
 import net.virtualviking.vropsexport.RowMetadata;
 
@@ -34,17 +36,25 @@ import java.io.BufferedWriter;
 
 import net.virtualviking.vropsexport.Rowset;
 import net.virtualviking.vropsexport.RowsetProcessor;
+import net.virtualviking.vropsexport.RowsetProcessorFacotry;
 
 public class CSVPrinter implements RowsetProcessor {
-	
+
+	public static class Factory implements RowsetProcessorFacotry {
+		@Override
+		public RowsetProcessor makeFromConfig(BufferedWriter bw, Config config, DataProvider dp, ProgressMonitor pm) {
+			return new CSVPrinter(bw, new SimpleDateFormat(config.getDateFormat()), dp, pm);
+		}
+	}
+
 	private final BufferedWriter bw;
-	
+
 	private final DateFormat df;
-	
+
 	private final DataProvider dp;
-	
+
 	private final ProgressMonitor pm;
-		
+
 	public CSVPrinter(BufferedWriter bw, DateFormat df, DataProvider dp, ProgressMonitor pm) {
 		this.bw = bw;
 		this.df = df;
@@ -53,12 +63,28 @@ public class CSVPrinter implements RowsetProcessor {
 	}
 
 	@Override
+	public void preample(RowMetadata meta, Config conf) throws ExporterException {
+		try {
+			// Output table header
+			//
+			bw.write("timestamp,resName");
+			for (Config.Field fld : conf.getFields()) {
+				bw.write(",");
+				bw.write(fld.getAlias());
+			}
+			bw.newLine();
+		} catch(IOException e) {
+			throw new ExporterException(e);
+		}
+	}
+
+	@Override
 	public void process(Rowset rowset, RowMetadata meta) throws ExporterException {
 		try {
-			synchronized(bw) {
-				for(Row row : rowset.getRows().values()) {
+			synchronized (bw) {
+				for (Row row : rowset.getRows().values()) {
 					long t = row.getTimestamp();
-					if(df != null) {
+					if (df != null) {
 						bw.write("\"" + df.format(new Date(t)) + "\"");
 					} else
 						bw.write("\"" + t + "\"");
@@ -66,7 +92,7 @@ public class CSVPrinter implements RowsetProcessor {
 					bw.write(dp.getResourceName(rowset.getResourceId()));
 					bw.write("\"");
 					Iterator<Object> itor = row.iterator(meta);
-					while(itor.hasNext()) {
+					while (itor.hasNext()) {
 						Object o = itor.next();
 						bw.write(",\"");
 						bw.write(o != null ? o.toString() : "");
@@ -76,9 +102,9 @@ public class CSVPrinter implements RowsetProcessor {
 					bw.flush();
 				}
 			}
-			if(pm != null)
+			if (pm != null)
 				pm.reportProgress(1);
-		} catch(IOException|HttpException e) {
+		} catch (IOException | HttpException e) {
 			throw new ExporterException(e);
 		}
 	}

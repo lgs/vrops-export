@@ -47,6 +47,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import net.virtualviking.vropsexport.processors.CSVPrinter;
+import net.virtualviking.vropsexport.processors.SQLDumper;
 
 import javax.net.ssl.SSLContext;
 
@@ -99,12 +100,6 @@ public class Exporter implements DataProvider {
 	private final Map<String, Integer> statPos = new HashMap<>();
 	
 	private final LRUCache<String, String> nameCache = new LRUCache<>(1000);
-		
-	private Pattern parentPattern = Pattern.compile("^\\$parent\\:([_A-Za-z][_A-Za-z0-9]*)\\.(.+)$");
-	
-	private Pattern parentSpecPattern = Pattern.compile("^([_\\-A-Za-z][_\\-A-Za-z0-9]*):(.+)$");
-	
-	private Pattern adapterAndResourceKindPattern = Pattern.compile("^([_\\-A-Za-z][_\\-A-Za-z0-9]*):(.+)$");
 	
 	private LRUCache<String, JSONObject> jsonCache = new LRUCache<>(1000);
 	
@@ -131,10 +126,22 @@ public class Exporter implements DataProvider {
 	private final boolean useTempFile;
 	
 	private ThreadPoolExecutor executor;
+	
+	private RowsetProcessorFacotry rspFactory;
+	
+	private static final Map<String, RowsetProcessorFacotry> rspFactories = new HashMap<>();
+	
+	static {
+		rspFactories.put("sql", new SQLDumper.Factory());
+		rspFactories.put("csv", new CSVPrinter.Factory());
+	}
 
 	public Exporter(String urlBase, String username, String password, boolean unsafeSsl, int threads, Config conf, boolean verbose, boolean useTempFile)
 			throws IOException, HttpException, KeyStoreException, NoSuchAlgorithmException, KeyManagementException, ExporterException {
-	
+		this.rspFactory = rspFactories.get(conf.getOutputFormat());
+		if(rspFactory == null)
+			throw new ExporterException("Unknown output format: " + conf.getOutputFormat());
+		
 		// Configure timeout
 		//
 		final RequestConfig requestConfig = RequestConfig.custom()
@@ -210,10 +217,6 @@ public class Exporter implements DataProvider {
 					new ArrayBlockingQueue<>(20), new ThreadPoolExecutor.CallerRunsPolicy());
 	}
 	
-	public String getResourceType() {
-		return conf.getResourceType();
-	}
-	
 	public boolean hasProps() {
 		return conf.hasProps();
 	}
@@ -221,32 +224,30 @@ public class Exporter implements DataProvider {
 	public void exportTo(Writer out, long begin, long end, String namePattern, String parentSpec, boolean quiet) throws IOException, HttpException, ExporterException {
 		BufferedWriter bw = new BufferedWriter(out);
 		Progress progress = null;
-
-		// Output table header
+		
+		// Create RowsetProcessor
 		//
-		bw.write("timestamp,resName");
-		for (Config.Field fld : this.conf.getFields()) {
-			bw.write(",");
-			bw.write(fld.getAlias());
-		}
-		bw.newLine();
-
 		RowMetadata meta = new RowMetadata(conf);
+		RowsetProcessor rsp = rspFactory.makeFromConfig(bw, conf, this, progress);
+		rsp.preample(meta, conf);
 		JSONArray resources;
 		String parentId = null;
 		if(parentSpec != null) {
 			// Lookup parent
 			//
-			Matcher m = parentSpecPattern.matcher(parentSpec);
+			Matcher m = Patterns.parentSpecPattern.matcher(parentSpec);
 			if(!m.matches())
 				throw new ExporterException("Not a valid parent spec: " + parentSpec + ". should be on the form ResourceKind:resourceName");
-			JSONArray pResources = this.fetchResources(m.group(1), m.group(2), 0).getJSONArray("resourceList");
+			// TODO: No way of specifying adapter type here. Should there be?
+			//
+			JSONArray pResources = this.fetchResources(m.group(1), null, m.group(2), 0).getJSONArray("resourceList");
 			if(pResources.length() == 0) 
 				throw new ExporterException("Parent not found");
 			if(pResources.length() > 1)
 				throw new ExporterException("Parent spec is not unique");
 			parentId = pResources.getJSONObject(0).getString("identifier");
 		} 
+	
 		int page = 0;
 		for(;;) {
 			JSONObject resObj = null;
@@ -257,7 +258,7 @@ public class Exporter implements DataProvider {
 				String url = "/suite-api/api/resources/" + parentId + "/relationships";
 				resObj = this.getJson(url, "relationshipType=CHILD", "page=" + page++);
 			} else
-				resObj = this.fetchResources(conf.getResourceType(), namePattern, page++);
+				resObj = this.fetchResources(conf.getResourceKind(), conf.getAdapterKind(), namePattern, page++);
 			resources = resObj.getJSONArray("resourceList");
 			
 			// If we got an empty set back, we ran out of pages.
@@ -271,6 +272,7 @@ public class Exporter implements DataProvider {
 				progress = new Progress(resObj.getJSONObject("pageInfo").getInt("totalCount"));
 				progress.reportProgress(0);
 			}
+			
 			// Canculate a suitable chunk size by assuming that responses should be kept shorter than MAX_RESPONSE_ROWS.
 			//
 			long estimatedRows = conf.getFields().length * (end - begin) / (conf.getRollupMinutes() * 60000);
@@ -287,9 +289,12 @@ public class Exporter implements DataProvider {
 					// Child relationships may return objects of the wrong type, so we have
 					// to check the type here.
 					//
-					if(!res.getJSONObject("resourceKey").getString("resourceKindKey").equals(conf.getResourceType()))
+					JSONObject rKey = res.getJSONObject("resourceKey");
+					if(!rKey.getString("resourceKindKey").equals(conf.getResourceKind()))
 						continue;
-					this.startChunkJob(bw, chunk, meta, begin, end, progress);
+					if(conf.getAdapterKind() != null && !rKey.getString("adapterKindKey").equals(conf.getAdapterKind()))
+						continue;
+					this.startChunkJob(bw, chunk, rsp, meta, begin, end, progress);
 					chunk = new ArrayList<>(chunkSize);
 				}
 			}
@@ -308,12 +313,12 @@ public class Exporter implements DataProvider {
 			System.err.println("100% done");
 	}
 	
-	private void startChunkJob(BufferedWriter bw, List<JSONObject> chunk, RowMetadata meta, long begin, long end, Progress progress) {
+	private void startChunkJob(BufferedWriter bw, List<JSONObject> chunk, RowsetProcessor rsp, RowMetadata meta, long begin, long end, Progress progress) {
 		this.executor.execute(new Runnable() {
 			@Override
 			public void run() {
 				try {
-					handleResources(bw, chunk, meta, begin, end, progress);
+					handleResources(bw, chunk, rsp, meta, begin, end, progress);
 				} catch (Exception e) {
 					log.error("Error while processing resource", e);
 				}
@@ -321,9 +326,11 @@ public class Exporter implements DataProvider {
 		});
 	}
 	
-	private JSONObject fetchResources(String resourceKind, String name, int page) throws JSONException, IOException, HttpException {
+	private JSONObject fetchResources(String resourceKind, String adapterKind, String name, int page) throws JSONException, IOException, HttpException {
 		String url = "/suite-api/api/resources";
 		ArrayList<String> qs = new ArrayList<>();
+		if(adapterKind != null)
+			qs.add("adapterKind=" + adapterKind);
 		qs.add("resourceKind=" + resourceKind);
 		qs.add("pageSize=" + PAGE_SIZE);
 		qs.add("page=" + page);
@@ -399,7 +406,7 @@ public class Exporter implements DataProvider {
 	public void printResourceMetadata(String adapterAndResourceKind, PrintStream out) throws IOException, HttpException {
 		String resourceKind = adapterAndResourceKind;
 		String adapterKind = "VMWARE";
-		Matcher m = adapterAndResourceKindPattern.matcher(adapterAndResourceKind);
+		Matcher m = Patterns.adapterAndResourceKindPattern.matcher(adapterAndResourceKind);
 		if(m.matches()) {
 			adapterKind = m.group(1);
 			resourceKind = m.group(2);
@@ -427,7 +434,7 @@ public class Exporter implements DataProvider {
 		}
 	}
 
-	private void handleResources(BufferedWriter bw, List<JSONObject> resList, RowMetadata meta, long begin, long end, ProgressMonitor progress) throws IOException, HttpException, ExporterException {
+	private void handleResources(BufferedWriter bw, List<JSONObject> resList, RowsetProcessor rsp, RowMetadata meta, long begin, long end, ProgressMonitor progress) throws IOException, HttpException, ExporterException {
 		InputStream content = null;
 		try {
 			long start = System.currentTimeMillis();
@@ -455,8 +462,8 @@ public class Exporter implements DataProvider {
 				left.add(resList.get(i++));
 			while(i < sz)
 				right.add(resList.get(i++));
-			this.handleResources(bw, left, meta, begin, end, progress);
-			this.handleResources(bw, right, meta, begin, end, progress);
+			this.handleResources(bw, left, rsp, meta, begin, end, progress);
+			this.handleResources(bw, right, rsp, meta, begin, end, progress);
 			return;
 		}
 		try {
@@ -483,7 +490,7 @@ public class Exporter implements DataProvider {
 			}
 			long start = System.currentTimeMillis();
 			StatsProcessor sp = new StatsProcessor(conf, this, rowsetCache, verbose);
-			sp.process(content, new CSVPrinter(bw, dateFormat, this, progress), begin, end);
+			sp.process(content,  rspFactory.makeFromConfig(bw, conf, this, progress), begin, end);
 			if(verbose)
 				System.err.println("Result processing took " + (System.currentTimeMillis() - start) + " ms");
 		} finally {
@@ -501,7 +508,7 @@ public class Exporter implements DataProvider {
         	
         	// Parse parent reference if present.
         	//
-        	Matcher m = parentPattern.matcher(name);
+        	Matcher m = Patterns.parentPattern.matcher(name);
         	if(m.matches()) {
         		String pn = m.group(1);
         		if(parentType == null) {

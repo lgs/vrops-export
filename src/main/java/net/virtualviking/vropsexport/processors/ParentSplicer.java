@@ -17,6 +17,7 @@ package net.virtualviking.vropsexport.processors;
 
 import java.util.List;
 
+import net.virtualviking.vropsexport.Config;
 import net.virtualviking.vropsexport.ExporterException;
 import net.virtualviking.vropsexport.LRUCache;
 import net.virtualviking.vropsexport.Row;
@@ -36,6 +37,11 @@ public class ParentSplicer implements RowsetProcessor {
 		this.rowsetCache = rowsetCache;
 	}
 
+	@Override
+	public void preample(RowMetadata meta, Config conf) throws ExporterException {
+		// Nothing to do...
+	}
+	
 	@Override
 	public void process(Rowset rowset, RowMetadata meta) throws ExporterException {
 		spliceRows(childRowset, rowset);

@@ -2,7 +2,7 @@
 Simple utility for exporting data from vRealize Operations.
 
 ## Description
-A simple command-line data export tool for vRealize Operations. Currently supports CVS, but additional output formats are planned.
+A simple command-line data export tool for vRealize Operations. Currently supports CVS and SQL, but additional output formats are planned.
 
 # Installation
 The tool can be installed from pre-built binaries or built from source. If you're unclear what "building from source" means, you probably want to use the binaries. Building from source is mainly for people who like to change the code and contribute to the project.
@@ -121,6 +121,9 @@ fields:                                          # A list of fields
   - alias: hostCPUType
     prop: $parent:HostSystem.cpu|cpuModel		# Reference to a metric in a parent
 ```
+
+## Exporting to SQL
+The tool now supports exporting to a SQL database. For details, please refer to [this document](SQL.md)
     
 # Known issues
 * Very long time ranges in combination with small interval sizes can cause the server to prematurely close the connection, resulting in NoHttpResponseExceptions to be thrown. If this happens, consider shortening the time range.

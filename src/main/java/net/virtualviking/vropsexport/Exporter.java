@@ -138,10 +138,12 @@ public class Exporter implements DataProvider {
 
 	public Exporter(String urlBase, String username, String password, boolean unsafeSsl, int threads, Config conf, boolean verbose, boolean useTempFile)
 			throws IOException, HttpException, KeyStoreException, NoSuchAlgorithmException, KeyManagementException, ExporterException {
-		this.rspFactory = rspFactories.get(conf.getOutputFormat());
-		if(rspFactory == null)
-			throw new ExporterException("Unknown output format: " + conf.getOutputFormat());
-		
+		if(conf != null)  {
+			this.rspFactory = rspFactories.get(conf.getOutputFormat());
+			if(rspFactory == null)
+				throw new ExporterException("Unknown output format: " + conf.getOutputFormat());
+		}
+			
 		// Configure timeout
 		//
 		final RequestConfig requestConfig = RequestConfig.custom()

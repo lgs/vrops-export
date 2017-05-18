@@ -42,6 +42,8 @@ import net.virtualviking.vropsexport.SQLConfig;
 import net.virtualviking.vropsexport.sql.NamedParameterStatement;
 
 public class SQLDumper implements RowsetProcessor {
+	private static final int MAX_BATCH = 1000;
+	
 	private static final Map<String, String> drivers = new HashMap<>();
 	
 	static {
@@ -71,6 +73,14 @@ public class SQLDumper implements RowsetProcessor {
 				driver = drivers.get(dbType);
 				if(driver == null)
 					throw new ExporterException("Database type " + dbType + " is not recognized. Check spelling or try to specifying the driver class instead!");
+				
+				// Make sure we can load the driver
+				//
+				try {
+					Class.forName(driver);
+				} catch(ClassNotFoundException e) {
+					throw new ExporterException("Could not load JDBC driver " + driver + ". Make sure you have set the JDBC_JAR env variable correctly");
+				}
 			}
 			if(ds == null) {
 				ds = new BasicDataSource();
@@ -79,6 +89,7 @@ public class SQLDumper implements RowsetProcessor {
 				
 				// Use either database type or driver.
 				//
+				ds.setDefaultAutoCommit(false);
 				ds.setDriverClassName(driver);
 				ds.setUrl(sqlc.getConnectionString());
 				if(sqlc.getUsername() != null) 
@@ -116,9 +127,11 @@ public class SQLDumper implements RowsetProcessor {
 	public void process(Rowset rowset, RowMetadata meta) throws ExporterException {
 		try {
 			Connection conn = ds.getConnection();
+			NamedParameterStatement stmt = null;
 			try {
+				stmt = new NamedParameterStatement(conn, sql);
+				int rowsInBatch = 0;
 				for(Row row : rowset.getRows().values()) {
-					NamedParameterStatement stmt = new NamedParameterStatement(conn, sql);
 					for(String fld : stmt.getParameterNames()) {
 						// Deal with special cases
 						//
@@ -133,7 +146,7 @@ public class SQLDumper implements RowsetProcessor {
 							if(p != -1) 
 								stmt.setObject(fld, row.getMetric(p));
 							else {
-								// Not a metric, so it must ne a property then.
+								// Not a metric, so it must be a property then.
 								//
 								p = meta.getPropertyIndexByAlias(fld);
 								if(p == -1)
@@ -142,11 +155,22 @@ public class SQLDumper implements RowsetProcessor {
 							}
 						}
 					}
-					stmt.executeUpdate();
+					stmt.addBatch();
+					if(++rowsInBatch > MAX_BATCH) {
+						stmt.executeBatch();
+						rowsInBatch = 0;
+					} 
 				}
+				// Push dangling batch
+				//
+				if(rowsInBatch > 0 && stmt != null) 
+					stmt.executeBatch();
+				conn.commit();
 				if(this.pm != null)
 					this.pm.reportProgress(1);
 			} finally {
+				if(stmt != null)
+					stmt.close();
 				conn.close();
 			}
 		} catch(SQLException|HttpException|IOException e) {

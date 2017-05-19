@@ -12,7 +12,7 @@ The tool can be installed from pre-built binaries or built from source. If you'r
 * Java JDK 1.8 installed on the machine where you plan to run the tool
 * vRealize Operations 6.3 or higher
 ### Installation on Linux, Mac or other UNIX-like OS
-1. Download the binaries from here: https://github.com/prydin/vrops-export/releases/download/2.0/vrops-export-2.0-SNAPSHOT-bin.zip
+1. Download the binaries from here: https://github.com/prydin/vrops-export/releases/tag/2.0.2
 2. Unzip the files:
 ```
 mkdir ~/vrops-export

@@ -28,6 +28,8 @@ public class SQLConfig {
 	
 	private String sql;
 	
+	private int batchSize;
+	
 	public SQLConfig() {
 	}
 
@@ -77,5 +79,13 @@ public class SQLConfig {
 
 	public void setSql(String sql) {
 		this.sql = sql;
+	}
+
+	public int getBatchSize() {
+		return batchSize;
+	}
+
+	public void setBatchSize(int batchSize) {
+		this.batchSize = batchSize;
 	}
 }

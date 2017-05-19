@@ -142,6 +142,18 @@ public class StatsProcessor {
 						for(Row row : rs.getRows().values()) 
 							row.setProp(idIdx, resourceId);
 					}
+					
+					// Put in name if requested
+					//
+					int nameIdx = rowMetadata.getPropertyIndex("$resName");
+					if(nameIdx != -1) {
+						String name = dataProvider.getResourceName(resourceId);
+						for(Row row : rs.getRows().values()) 
+							row.setProp(nameIdx, name);
+					}
+					
+					// Splice in properties
+					//
 					Map<String, String> props = dataProvider.fetchProps(resourceId);
 					for(Map.Entry<String, String> e : props.entrySet()) {
 						int idx = rowMetadata.getPropertyIndex(e.getKey());
@@ -161,8 +173,9 @@ public class StatsProcessor {
 					JSONObject parent = dataProvider.getParentOf(resourceId, pm.getResourceKind());
 					if(parent != null) {
 						Rowset cached = null;
+						String cacheKey = parent.getString("identifier") + "|" + begin + "|" + end;
 						synchronized(this.rowsetCache) {
-							cached = this.rowsetCache.get(parent.getString("identifier"));
+							cached = this.rowsetCache.get(cacheKey);
 						}
 						// Try cache first! Chances are we've seen this parent many times.
 						//
@@ -176,18 +189,19 @@ public class StatsProcessor {
 							StatsProcessor parentProcessor = new StatsProcessor(this.conf, pm, this.dataProvider, this.rowsetCache, verbose);
 							InputStream pIs = this.dataProvider.fetchMetricStream(Collections.singletonList(parent), pm, begin, end);
 							try {
-								parentProcessor.process(pIs, new ParentSplicer(rs, this.rowsetCache), begin, end);
+								parentProcessor.process(pIs, new ParentSplicer(rs, this.rowsetCache, cacheKey), begin, end);
 							} finally {
 								pIs.close();
 							}
 						}
 					}
 					if(verbose)
-						System.err.println("Parent processing took " + (System.currentTimeMillis() - now) + " ms");
+						System.err.println("Parent processing took " + (System.currentTimeMillis() - now));
 				}
 			}
 			if(verbose)
-				System.err.println("Processed " + rs.getRows().size() + " rows");
+				System.err.println("Processed " + rs.getRows().size() + " rows. Memory used: " + 
+						Runtime.getRuntime().totalMemory() + " max=" + Runtime.getRuntime().maxMemory());
 			proc.process(rs, rowMetadata);
 		}
 		this.expect(p, JsonToken.END_OBJECT);

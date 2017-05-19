@@ -76,16 +76,18 @@ public class Main {
     		//
     		String resourceKind = commandLine.getOptionValue('F');
     		if(resourceKind != null) {
-    			Exporter exporter = new Exporter(host, username, password, trustCerts, threads, null, verbose, useTmpFile);
+    			Exporter exporter = new Exporter(host, username, password, trustCerts, threads, null, verbose, useTmpFile, 5000);
     			exporter.printResourceMetadata(resourceKind, System.out);
     		} else if(commandLine.hasOption('R')) {
     			String adapterKind = commandLine.getOptionValue('R');
-    			Exporter exporter = new Exporter(host, username, password, trustCerts, threads, null, verbose, useTmpFile);
+    			Exporter exporter = new Exporter(host, username, password, trustCerts, threads, null, verbose, useTmpFile, 5000);
     			exporter.printResourceKinds(adapterKind, System.out);
     		} else {	
 	    		String defFile = commandLine.getOptionValue('d');
 	    		if(defFile == null) 
 	    			throw new ExporterException("Definition file must be specified");
+	    		String mrS = commandLine.getOptionValue('m');
+	    		int maxRows = mrS != null ? Integer.parseInt(mrS) : 0;
 	    		
 	    		// Deal with lookback/time period
 	    		//
@@ -142,7 +144,7 @@ public class Main {
 		        			throw new ExporterException(e.getMessage());
 		        		}
 		        	}
-			        Exporter exporter = new Exporter(host, username, password, trustCerts, threads, conf, verbose, useTmpFile);
+			        Exporter exporter = new Exporter(host, username, password, trustCerts, threads, conf, verbose, useTmpFile, maxRows);
 			        Writer wrt = output != null ? new FileWriter(output) : new OutputStreamWriter(System.out);
 			        exporter.exportTo(wrt, begin, end, namePattern, parentSpec, quiet);
 		    	} finally {
@@ -178,6 +180,7 @@ public class Main {
 		opts.addOption("t", "threads", true, "Number of parallel processing threads (default=10)");
 		opts.addOption("S", "streaming", false, "True streaming processing. Faster but less reliable");
 		opts.addOption("R", "resource-kinds", true, "List resource kinds");
+		opts.addOption("m", "max-rows", true, "Maximum number of rows to fetch from API (default=unlimited)");
 		opts.addOption("h", "help", false, "Print a short help text");
 		return opts;
 	}		

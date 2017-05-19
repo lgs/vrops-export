@@ -44,38 +44,47 @@ public class SelfDeletingFileInputStream extends InputStream {
 		return backer.read();
 	}
 
+	@Override
 	public int hashCode() {
 		return backer.hashCode();
 	}
 
+	@Override
 	public boolean equals(Object obj) {
 		return backer.equals(obj);
 	}
 
+	@Override
 	public int read(byte[] b) throws IOException {
 		return backer.read(b);
 	}
 
+	@Override
 	public int read(byte[] b, int off, int len) throws IOException {
 		return backer.read(b, off, len);
 	}
 
+	@Override
 	public String toString() {
 		return backer.toString();
 	}
 
+	@Override
 	public long skip(long n) throws IOException {
 		return backer.skip(n);
 	}
 
+	@Override
 	public int available() throws IOException {
 		return backer.available();
 	}
 
+	@Override
 	public void mark(int readlimit) {
 		backer.mark(readlimit);
 	}
 
+	@Override
 	public void close() throws IOException {
 		backer.close();
 		file.delete();
@@ -89,11 +98,22 @@ public class SelfDeletingFileInputStream extends InputStream {
 		return backer.getChannel();
 	}
 
+	@Override
 	public void reset() throws IOException {
 		backer.reset();
 	}
 
+	@Override
 	public boolean markSupported() {
 		return backer.markSupported();
+	}
+	
+	@Override
+	public void finalize() {
+		try {
+			this.close();
+		} catch(IOException e) {
+			// Do nothing. It's probably just already closed.
+		}
 	}
 }

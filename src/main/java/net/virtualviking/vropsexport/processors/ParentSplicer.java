@@ -30,15 +30,18 @@ public class ParentSplicer implements RowsetProcessor {
 	private final Rowset childRowset; 
 	
 	private final LRUCache<String, Rowset> rowsetCache;
+	
+	private final String cacheKey;
 
-	public ParentSplicer(Rowset childRowset, LRUCache<String, Rowset> rowsetCache) {
+	public ParentSplicer(Rowset childRowset, LRUCache<String, Rowset> rowsetCache, String cacheKey) {
 		super();
 		this.childRowset = childRowset;
 		this.rowsetCache = rowsetCache;
+		this.cacheKey = cacheKey;
 	}
 
 	@Override
-	public void preample(RowMetadata meta, Config conf) throws ExporterException {
+	public void preamble(RowMetadata meta, Config conf) throws ExporterException {
 		// Nothing to do...
 	}
 	
@@ -46,7 +49,7 @@ public class ParentSplicer implements RowsetProcessor {
 	public void process(Rowset rowset, RowMetadata meta) throws ExporterException {
 		spliceRows(childRowset, rowset);
 		synchronized(this.rowsetCache) {
-			this.rowsetCache.put(rowset.getResourceId(), rowset);
+			this.rowsetCache.put(cacheKey, rowset);
 		}
 	}
 	

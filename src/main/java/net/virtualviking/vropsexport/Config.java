@@ -88,10 +88,6 @@ public class Config {
 		this.fields = fields;
 	}
 
-	private String getResourceType() {
-		return resourceType;
-	}
-
 	public void setResourceType(String resourceType) {
 		Matcher m = Patterns.adapterAndResourceKindPattern.matcher(resourceType);
 		if(m.matches()) {

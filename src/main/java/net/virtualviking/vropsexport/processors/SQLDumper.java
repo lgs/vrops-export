@@ -42,7 +42,11 @@ import net.virtualviking.vropsexport.SQLConfig;
 import net.virtualviking.vropsexport.sql.NamedParameterStatement;
 
 public class SQLDumper implements RowsetProcessor {
+	private static final int DEFAULT_BATCH_SIZE = 1000;
+	
 	private static final Map<String, String> drivers = new HashMap<>();
+	
+	private final int batchSize;
 	
 	static {
 		drivers.put("postgres", "org.postgresql.Driver");
@@ -61,6 +65,12 @@ public class SQLDumper implements RowsetProcessor {
 			if(sqlc == null)
 				throw new ExporterException("SQL section must be present in the definition file");
 			
+			// Determine batchsize 
+			// 
+			int batchSize = sqlc.getBatchSize();
+			if(batchSize == 0) 
+				batchSize = DEFAULT_BATCH_SIZE;
+			
 			// The driver can be either read directly or derived from the database type
 			//
 			String driver = sqlc.getDriver();
@@ -71,14 +81,23 @@ public class SQLDumper implements RowsetProcessor {
 				driver = drivers.get(dbType);
 				if(driver == null)
 					throw new ExporterException("Database type " + dbType + " is not recognized. Check spelling or try to specifying the driver class instead!");
+				
+				// Make sure we can load the driver
+				//
+				try {
+					Class.forName(driver);
+				} catch(ClassNotFoundException e) {
+					throw new ExporterException("Could not load JDBC driver " + driver + ". Make sure you have set the JDBC_JAR env variable correctly");
+				}
 			}
 			if(ds == null) {
 				ds = new BasicDataSource();
-				if(sqlc == null) 
+				if(sqlc.getConnectionString() == null) 
 					throw new ExporterException("SQL connection URL must be specified");
 				
 				// Use either database type or driver.
 				//
+				ds.setDefaultAutoCommit(false);
 				ds.setDriverClassName(driver);
 				ds.setUrl(sqlc.getConnectionString());
 				if(sqlc.getUsername() != null) 
@@ -88,7 +107,7 @@ public class SQLDumper implements RowsetProcessor {
 			}
 			if(sqlc.getSql() == null)
 				throw new ExporterException("SQL statement must be specified");
-			return new SQLDumper(ds, dp, sqlc.getSql(), pm);
+			return new SQLDumper(ds, dp, sqlc.getSql(), pm, batchSize);
 		}
 	}
 	private final DataSource ds;
@@ -99,16 +118,17 @@ public class SQLDumper implements RowsetProcessor {
 	
 	private ProgressMonitor pm;
 
-	public SQLDumper(DataSource ds, DataProvider dp, String sql, ProgressMonitor pm) {
+	public SQLDumper(DataSource ds, DataProvider dp, String sql, ProgressMonitor pm, int batchSize) {
 		super();
 		this.ds = ds;
 		this.dp = dp;
 		this.sql = sql;
 		this.pm = pm;
+		this.batchSize = batchSize;
 	}
 	
 	@Override
-	public void preample(RowMetadata meta, Config conf) throws ExporterException {
+	public void preamble(RowMetadata meta, Config conf) throws ExporterException {
 		// Nothing to do...
 	}
 
@@ -116,9 +136,11 @@ public class SQLDumper implements RowsetProcessor {
 	public void process(Rowset rowset, RowMetadata meta) throws ExporterException {
 		try {
 			Connection conn = ds.getConnection();
+			NamedParameterStatement stmt = null;
 			try {
+				stmt = new NamedParameterStatement(conn, sql);
+				int rowsInBatch = 0;
 				for(Row row : rowset.getRows().values()) {
-					NamedParameterStatement stmt = new NamedParameterStatement(conn, sql);
 					for(String fld : stmt.getParameterNames()) {
 						// Deal with special cases
 						//
@@ -133,7 +155,7 @@ public class SQLDumper implements RowsetProcessor {
 							if(p != -1) 
 								stmt.setObject(fld, row.getMetric(p));
 							else {
-								// Not a metric, so it must ne a property then.
+								// Not a metric, so it must be a property then.
 								//
 								p = meta.getPropertyIndexByAlias(fld);
 								if(p == -1)
@@ -142,11 +164,22 @@ public class SQLDumper implements RowsetProcessor {
 							}
 						}
 					}
-					stmt.executeUpdate();
+					stmt.addBatch();
+					if(++rowsInBatch > batchSize) {
+						stmt.executeBatch();
+						rowsInBatch = 0;
+					} 
 				}
+				// Push dangling batch
+				//
+				if(rowsInBatch > 0 && stmt != null) 
+					stmt.executeBatch();
+				conn.commit();
 				if(this.pm != null)
 					this.pm.reportProgress(1);
 			} finally {
+				if(stmt != null)
+					stmt.close();
 				conn.close();
 			}
 		} catch(SQLException|HttpException|IOException e) {

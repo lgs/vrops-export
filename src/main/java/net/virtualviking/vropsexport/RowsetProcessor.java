@@ -16,6 +16,6 @@
 package net.virtualviking.vropsexport;
 
 public interface RowsetProcessor {
-	public void preample(RowMetadata meta, Config conf) throws ExporterException;
+	public void preamble(RowMetadata meta, Config conf) throws ExporterException;
 	public void process(Rowset rowset, RowMetadata meta) throws ExporterException;
 }

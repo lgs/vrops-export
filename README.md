@@ -122,11 +122,33 @@ fields:                                          # A list of fields
     prop: $parent:HostSystem.cpu|cpuModel		# Reference to a metric in a parent
 ```
 
+### Special properties in the definition file
+There are a number of special properties that are always available for use in a properties file for getting things like parent resources and resource names.
+
+* $resdId - Internal ID of the current resource.
+* $resName - Resource name of the current resource
+* $parent - Reference to a parent resource. 
+
+### Referencing parent resources
+The syntax for referencing parent resources is as follows: 
+```
+$parent:<Parent Kind>.<metric or property>
+``` 
+For example:
+```
+$parent:HostSystem.cpu|demandmhz
+``` 
+Notice that you can stack several $parent keywords. For example, this gets the total CPU demand of a parent cluster based on a VM:
+```
+$parent:HostSystem.$parent:ClusterComputeResource.cpu|demandmhz
+```
+
 ## Exporting to SQL
 The tool now supports exporting to a SQL database. For details, please refer to [this document](SQL.md)
     
 # Known issues
-* Very long time ranges in combination with small interval sizes can cause the server to prematurely close the connection, resulting in NoHttpResponseExceptions to be thrown. If this happens, consider shortening the time range.
+* Very long time ranges in combination with small interval sizes can cause the server to prematurely close the connection, resulting in NoHttpResponseExceptions to be thrown. If this happens, consider shortening the time range. This seems to happen mostly when exporting over a slow connection.
+* Only one parent resource type is supported. This will be fixed in a future release.
 
 # Contributing to the code
 Contributing with code and new ideas is encouraged! If you have a great idea for a new or improved feature, please file a feature request under the "issues" tab in Github. 

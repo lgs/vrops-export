@@ -21,6 +21,7 @@
 				<include>*.jar</include>
 				<include>*.sh</include>
 				<include>*.yaml</include>
+				<include>*.bat</include>
 			</includes>
 		</fileSet>
 		<fileSet>

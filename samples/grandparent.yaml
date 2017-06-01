@@ -20,10 +20,6 @@ fields:
 # CPU fields
   - alias: cpuDemand
     metric: cpu|demandPct
-  - alias: hostCpu
-    metric: $parent:HostSystem.cpu|demandmhz   
-  - alias: cpuDemand
-    metric: cpu|demandPct
   - alias: cpuReady
     metric: cpu|readyPct
   - alias: cpuCostop
@@ -58,4 +54,15 @@ fields:
  # Host name a different way
   - alias: hostName2
     prop: $parent:HostSystem.$resName
- 
+  # Cluster Name
+  - alias: clusterCPU
+    prop: $parent:HostSystem.$parent:ClusterComputeResource.$resName
+ # Cluster CPU
+  - alias: clusterCPU
+    metric: $parent:HostSystem.$parent:ClusterComputeResource.cpu|demandmhz
+ # Datacenter cpu
+  - alias: dcCpu
+    metric: $parent:HostSystem.$parent:ClusterComputeResource.$parent:Datacenter.cpu|demandPct
+ # Datacenter name
+  - alias: dcName
+    prop: $parent:HostSystem.$parent:ClusterComputeResource.$parent:Datacenter.$resName

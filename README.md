@@ -55,24 +55,41 @@ chmod +x exporttool.sh
 
 ## Command syntax
 ```
-usage: exporttool [-d <arg>] [-H <arg>] [-h] [-i] [-l <arg>] [-n <arg>]
-       [-o <arg>] [-p <arg>] [-q] [-u <arg>]
-       
- -d,--definition <arg>    Path to definition file
- -e,--end <arg>           Time period end (date format in definition file)
- -F,--list-fields <arg>   Print name and keys of all fields to stdout
- -H,--host <arg>          URL to vRealize Operations Host
- -h,--help                Print a short help
- -i,--ignore-cert         Trust any cert
- -l,--lookback <arg>      Lookback time
- -n,--namequery <arg>     Name query
- -o,--output <arg>        Output file
- -P,--parent <arg>        Parent resource (ResourceKind:resourceName)
- -p,--password <arg>      Password
- -q,--quiet               Quiet mode (no progress counter)
- -s,--start <arg>         Time period start (date format in definition file)
- -u,--username <arg>      Username
+usage: exporttool [-d <arg>] [-e <arg>] [-F <arg>] [-H <arg>] [-h] [-i]
+       [-l <arg>] [-m <arg>] [-n <arg>] [-o <arg>] [-P <arg>] [-p <arg>]
+       [-q] [-R <arg>] [-s <arg>] [-S] [-t <arg>] [-T <arg>] [--trustpass
+       <arg>] [-u <arg>] [-v]
+
+ -d,--definition <arg>       Path to definition file
+ -e,--end <arg>              Time period end (date format in definition
+                             file)
+ -F,--list-fields <arg>      Print name and keys of all fields to stdout
+ -H,--host <arg>             URL to vRealize Operations Host
+ -h,--help                   Print a short help text
+ -i,--ignore-cert            Trust any cert (DEPRECATED!)
+ -l,--lookback <arg>         Lookback time
+ -m,--max-rows <arg>         Maximum number of rows to fetch from API
+                             (default=unlimited)
+ -n,--namequery <arg>        Name query
+ -o,--output <arg>           Output file
+ -P,--parent <arg>           Parent resource (ResourceKind:resourceName)
+ -p,--password <arg>         Password
+ -q,--quiet                  Quiet mode (no progress counter)
+ -R,--resource-kinds <arg>   List resource kinds
+ -s,--start <arg>            Time period start (date format in definition
+                             file)
+ -S,--streaming              True streaming processing. Faster but less
+                             reliable
+ -t,--threads <arg>          Number of parallel processing threads
+                             (default=10)
+ -T,--truststore <arg>       Truststore filename
+    --trustpass <arg>        Truststore password (default=changeit)
+ -u,--username <arg>         Username
+ -v,--verbose                Print debug and timing information
  ```
+ ### Certificate and trust management
+ As of version 2.1.0, the -i option has been deprecated for security reasons. Instead, the tool will prompt the user when it encounters an untrusted certificate. If the user chooses to trust the certificate, it is stored in a personal truststore and reused next time the tool is executed against that host. By default, the trusted certs are stored in $HOME/.vropsexport/truststore, but the location can be overridden using the -T flag.
+ 
  ### Notes:
  * Start and end dates will use the date format specified in the definition file. Since dates tend to contain spaces and special characters, you probably want to put dates within double quotes (").
  * If you're unsure of what the metric names are, use the -F option to print the metric names and keys for a specific resource type, e.g. -F VirtualMachine

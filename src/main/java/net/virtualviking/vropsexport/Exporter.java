@@ -35,6 +35,7 @@ import java.io.InputStream;
 import java.io.PrintStream;
 import java.io.Writer;
 import java.security.KeyManagementException;
+import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
@@ -100,7 +101,8 @@ public class Exporter implements DataProvider {
 		rspFactories.put("csv", new CSVPrinter.Factory());
 	}
 
-	public Exporter(String urlBase, String username, String password, boolean unsafeSsl, int threads, Config conf, boolean verbose, boolean useTempFile, int maxRows)
+	public Exporter(String urlBase, String username, String password, int threads, Config conf, boolean verbose, boolean useTempFile, int maxRows,
+			KeyStore extendedTrust)
 			throws IOException, HttpException, KeyStoreException, NoSuchAlgorithmException, KeyManagementException, ExporterException {
 		if(conf != null)  {
 			this.rspFactory = rspFactories.get(conf.getOutputFormat());
@@ -113,8 +115,7 @@ public class Exporter implements DataProvider {
 		this.useTempFile = useTempFile;
 		this.conf = conf;
 		this.maxRows = maxRows;
-		
-		this.client = new Client(urlBase, username, password, unsafeSsl, threads);
+		this.client = new Client(urlBase, username, password, threads, extendedTrust);
 		
 		// Calling this with a null conf is only valid if we're printing field names and nothing else. 
 		// Everything else will crash miserably! (Yeah, this is a bit of a hack...)
